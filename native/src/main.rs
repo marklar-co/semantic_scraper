@@ -1,11 +1,12 @@
-use anyhow::Result;
-use log::{info, LevelFilter};
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use serde::{Deserialize, Serialize};
-use serde_json::to_string;
-use simplelog::{WriteLogger, Config};
 use std::fs::File;
 use std::io::{self, Read, Write};
+
+use anyhow::Result;
+use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+use log::{info, LevelFilter};
+use serde::{Deserialize, Serialize};
+use serde_json::to_string;
+use simplelog::{Config, WriteLogger};
 
 const MSG_LEN_MAX: u32 = 8 * 1024;
 
@@ -13,8 +14,14 @@ const MSG_LEN_MAX: u32 = 8 * 1024;
 #[serde(tag = "type")]
 #[derive(Debug)]
 enum FromBrowser {
-    Ping { req_id: u64 },
-    GetTextTopics { req_id: u64, url: String, text: String },
+    Ping {
+        req_id: u64,
+    },
+    GetTextTopics {
+        req_id: u64,
+        url: String,
+        text: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -23,15 +30,19 @@ enum FromBrowser {
 enum ToBrowser {
     Pong { req_id: u64 },
     ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConf { key: String, val: String }
+    UpdateConf { key: String, val: String },
 }
 
+#[cfg(target_family = "unix")]
+const LOG_FILEPATH: &str = r"/home/darcy/code/semantic_collector/native/hello.log";
+#[cfg(target_family = "windows")]
+const LOG_FILEPATH: &str = r"C:\dev\semantic_collector\native\hello.log";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     WriteLogger::init(
         LevelFilter::Info,
         Config::default(),
-        File::create(r"C:\dev\semantic_scraper\native\hello.log")?
+        File::create(LOG_FILEPATH)?,
     )?;
 
     info!("nativeex started");
@@ -73,20 +84,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-
-fn process_message(
-    stdout_lock: &mut std::io::StdoutLock,
-    request: FromBrowser,
-) -> Result<()> {
+fn process_message(stdout_lock: &mut std::io::StdoutLock, request: FromBrowser) -> Result<()> {
     match request {
         FromBrowser::Ping { req_id } => {
             info!("ping received from browser");
             send_response(stdout_lock, &ToBrowser::Pong { req_id })?;
-        },
-        FromBrowser::GetTextTopics { req_id, url: _, text: _ } => {
+        }
+        FromBrowser::GetTextTopics {
+            req_id,
+            url: _,
+            text: _,
+        } => {
             let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
             send_response(stdout_lock, &ToBrowser::ReturnTextTopics { req_id, topics })?;
-        },
+        }
     }
 
     Ok(())
