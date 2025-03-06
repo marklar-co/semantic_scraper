@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::sync::Arc;
 
 use anyhow::Result;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
@@ -7,6 +8,8 @@ use log::{info, LevelFilter};
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use simplelog::{Config, WriteLogger};
+use tokio::sync::Mutex;
+use tokio::task;
 
 const MSG_LEN_MAX: u32 = 8 * 1024;
 
@@ -38,7 +41,8 @@ const LOG_FILEPATH: &str = r"/home/darcy/code/semantic_collector/native/hello.lo
 #[cfg(target_family = "windows")]
 const LOG_FILEPATH: &str = r"C:\dev\semantic_collector\native\hello.log";
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     WriteLogger::init(
         LevelFilter::Info,
         Config::default(),
@@ -51,7 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stdin_lock = stdin.lock();
 
     let stdout = io::stdout();
-    let mut stdout_lock = stdout.lock();
+    let stdout_lock = Arc::new(Mutex::new(stdout));
+
+    let mut handles = Vec::new();
 
     loop {
         let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
@@ -68,27 +74,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         stdin_lock.read_exact(&mut buffer)?;
         let request: Result<FromBrowser, _> = serde_json::from_slice(&buffer);
 
-        if let Ok(message) = request {
-            if let Err(e) = process_message(&mut stdout_lock, message) {
-                info!("Failed to process message: {e}");
+        let stdout_lock = stdout_lock.clone();
+
+        handles.push(task::spawn(async move {
+            if let Ok(message) = request {
+                if let Err(e) = process_message(&*stdout_lock, message).await {
+                    info!("Failed to process message: {e}");
+                }
+            } else {
+                match std::str::from_utf8(&buffer) {
+                    Ok(buffer_str) => info!("failed to parse FromBrowser: {}", buffer_str),
+                    Err(_) => info!("failed to parse FromBrowser: {:?}", buffer),
+                }
             }
-        } else {
-            match std::str::from_utf8(&buffer) {
-                Ok(buffer_str) => info!("failed to parse FromBrowser: {}", buffer_str),
-                Err(_) => info!("failed to parse FromBrowser: {:?}", buffer),
-            }
-            continue;
-        }
+        }));
+    }
+
+    for handle in handles {
+        handle.await?;
     }
 
     Ok(())
 }
 
-fn process_message(stdout_lock: &mut std::io::StdoutLock, request: FromBrowser) -> Result<()> {
+async fn process_message(stdout_lock: &Mutex<std::io::Stdout>, request: FromBrowser) -> Result<()> {
+    // std::thread::sleep(std::time::Duration::from_millis(100));
+    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
     match request {
         FromBrowser::Ping { req_id } => {
             info!("ping received from browser");
-            send_response(stdout_lock, &ToBrowser::Pong { req_id })?;
+            send_response(stdout_lock, &ToBrowser::Pong { req_id }).await?;
         }
         FromBrowser::GetTextTopics {
             req_id,
@@ -96,19 +111,21 @@ fn process_message(stdout_lock: &mut std::io::StdoutLock, request: FromBrowser) 
             text: _,
         } => {
             let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
-            send_response(stdout_lock, &ToBrowser::ReturnTextTopics { req_id, topics })?;
+            send_response(stdout_lock, &ToBrowser::ReturnTextTopics { req_id, topics }).await?;
         }
     }
 
     Ok(())
 }
 
-fn send_response(stdout_lock: &mut std::io::StdoutLock, response: &ToBrowser) -> Result<()> {
+async fn send_response(stdout_lock: &Mutex<std::io::Stdout>, response: &ToBrowser) -> Result<()> {
     let response_string = to_string(response)?;
     let response_length = u32::try_from(response_string.len())?;
 
-    stdout_lock.write_u32::<NativeEndian>(response_length)?;
-    stdout_lock.write_all(response_string.as_bytes())?;
-    stdout_lock.flush()?;
+    let mut stdout = stdout_lock.lock().await;
+
+    stdout.write_u32::<NativeEndian>(response_length)?;
+    stdout.write_all(response_string.as_bytes())?;
+    stdout.flush()?;
     Ok(())
 }

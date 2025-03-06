@@ -120,7 +120,9 @@ function sendPing() {
 chrome.runtime.onInstalled.addListener(() => {
     connectNative();
     setTimeout(() => {
-        sendPing();
+        for (let i = 0; i < 10; ++i) {
+            sendPing();
+        }
         sendReadingTextClassifyRequest('Example reading text', 'http://example.com');
     }, 1000); // Delay to ensure connection is established
 });
