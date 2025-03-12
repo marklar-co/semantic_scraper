@@ -37,9 +37,9 @@ enum ToBrowser {
 }
 
 #[cfg(target_family = "unix")]
-const LOG_FILEPATH: &str = r"/home/darcy/code/semantic_collector/native/hello.log";
+const LOG_FILEPATH: &str = r"/home/darcy/code/nativeext/native/hello.log";
 #[cfg(target_family = "windows")]
-const LOG_FILEPATH: &str = r"C:\dev\semantic_collector\native\hello.log";
+const LOG_FILEPATH: &str = r"C:\dev\nativeext\native\hello.log";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -99,7 +99,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn process_message(stdout_lock: &Mutex<std::io::Stdout>, request: FromBrowser) -> Result<()> {
     // std::thread::sleep(std::time::Duration::from_millis(100));
-    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+    use std::io::Read as _;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .create(false)
+        .open("/dev/urandom")
+        .unwrap();
+    let mut buf = [0u8; 1];
+    file.read_exact(&mut buf).unwrap();
+    let number = buf[0];
+
+    let number = number as u64 * 5 + 2000;
+    info!("sleep: {}", number);
+
+    tokio::time::sleep(std::time::Duration::from_millis(number)).await;
+
     match request {
         FromBrowser::Ping { req_id } => {
             info!("ping received from browser");
