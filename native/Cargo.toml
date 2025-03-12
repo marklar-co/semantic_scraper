@@ -13,7 +13,3 @@ serde = { version = "1.0.218", features = ["derive"] }
 serde_json = "1.0.140"
 tokio = { version = "1.43.0", features = ["full"] }
 
-[dev-dependencies]
-assert_cmd = "2.0.14"
-predicates = "3.1.2"
-tempfile = "3.12.0"
