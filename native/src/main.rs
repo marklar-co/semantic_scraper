@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
@@ -60,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut handles = Vec::new();
 
     loop {
+        info!("next message");
         let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
             info!("failed to read message length (probably browser exit)");
             break;
@@ -98,21 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn process_message(stdout_lock: &Mutex<std::io::Stdout>, request: FromBrowser) -> Result<()> {
-    // std::thread::sleep(std::time::Duration::from_millis(100));
-    use std::io::Read as _;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .create(false)
-        .open("/dev/urandom")
-        .unwrap();
-    let mut buf = [0u8; 1];
-    file.read_exact(&mut buf).unwrap();
-    let number = buf[0];
-
-    let number = number as u64 * 5 + 2000;
-    info!("sleep: {}", number);
-
-    tokio::time::sleep(std::time::Duration::from_millis(number)).await;
+    tokio::time::sleep(random_duration()).await;
 
     match request {
         FromBrowser::Ping { req_id } => {
@@ -130,6 +118,23 @@ async fn process_message(stdout_lock: &Mutex<std::io::Stdout>, request: FromBrow
     }
 
     Ok(())
+}
+
+fn random_duration() -> Duration {
+    use std::io::Read as _;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .create(false)
+        .open("/dev/urandom")
+        .unwrap();
+    let mut buf = [0u8; 1];
+    file.read_exact(&mut buf).unwrap();
+    let number = buf[0];
+
+    let number = number as u64 * 5 + 500;
+    info!("sleep duration: {}", number);
+
+    Duration::from_millis(number)
 }
 
 async fn send_response(stdout_lock: &Mutex<std::io::Stdout>, response: &ToBrowser) -> Result<()> {
