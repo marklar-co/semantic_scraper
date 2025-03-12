@@ -1,9 +1,9 @@
 {
-    "name": "ai.chamomile.semantic_collector",
-    "description": "Semantic Collector Native Host",
-    "path": "/home/darcy/code/semantic_collector/native/target/debug/nativeext",
+    "name": "ai.chamomile.nativeext",
+    "description": "NativeExt Native Host",
+    "path": "/home/darcy/code/nativeext/native/target/debug/nativeext",
     "type": "stdio",
     "allowed_origins": [
-      "chrome-extension://cckolbgaeipgklfdemjbmppecfdjenja/"
+      "chrome-extension://mbmcfhcjkiceaphfigcjehjcgjdnedjp/"
     ]
 }

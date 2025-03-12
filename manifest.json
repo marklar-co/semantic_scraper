@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "Semantic Collector",
-    "short_name": "SemCollect",
-    "description": "Crawl and collect web page content. Download results in JSON format.",
+    "name": "NativeExt",
+    "short_name": "NativeExt",
+    "description": "NativeExt",
     "version": "0.0.1",
     "permissions": [
         "activeTab",
@@ -19,14 +19,14 @@
     "action": {
         "default_popup": "popup.html",
         "default_icon": {
-            "16": "semantic_amp_logo.png",
-            "48": "semantic_amp_logo.png",
-            "128": "semantic_amp_logo.png"
+            "16": "icon.png",
+            "48": "icon.png",
+            "128": "icon.png"
         }
     },
     "icons": {
-        "16": "semantic_amp_logo.png",
-        "48": "semantic_amp_logo.png",
-        "128": "semantic_amp_logo.png"
+        "16": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
     }
 }
