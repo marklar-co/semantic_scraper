@@ -1,96 +1,44 @@
-use std::fs::File;
 use std::io::{self, Read, Write};
+use std::ops::ControlFlow;
+use std::panic;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use log::{info, LevelFilter};
-use serde::{Deserialize, Serialize};
 use serde_json::to_string;
 use simplelog::{Config, WriteLogger};
+use zeromq::{Socket as _, SocketRecv as _};
+
 use tokio::sync::Mutex;
-use tokio::task;
+use tokio::task::{self, JoinHandle};
+
+use nativeext::{FromBrowser, ToBrowser};
 
 const MSG_LEN_MAX: u32 = 8 * 1024;
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[derive(Debug)]
-enum FromBrowser {
-    Ping {
-        req_id: u64,
-    },
-    GetTextTopics {
-        req_id: u64,
-        url: String,
-        text: String,
-    },
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[derive(Debug)]
-enum ToBrowser {
-    Pong { req_id: u64 },
-    ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConf { key: String, val: String },
-}
-
-#[cfg(target_family = "unix")]
-const LOG_FILEPATH: &str = r"/home/darcy/code/nativeext/native/hello.log";
-#[cfg(target_family = "windows")]
-const LOG_FILEPATH: &str = r"C:\dev\nativeext\native\hello.log";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    WriteLogger::init(
-        LevelFilter::Info,
-        Config::default(),
-        File::create(LOG_FILEPATH)?,
-    )?;
+    WriteLogger::init(LevelFilter::Info, Config::default(), io::stderr())?;
+
+    // Exit main thread on any thread panic
+    let default_panic = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        default_panic(info);
+        std::process::exit(1);
+    }));
 
     info!("nativeex started");
 
-    let stdin = io::stdin();
-    let mut stdin_lock = stdin.lock();
+    let mut stdin_lock = io::stdin().lock();
+    let stdout_lock = Arc::new(Mutex::new(io::stdout()));
 
-    let stdout = io::stdout();
-    let stdout_lock = Arc::new(Mutex::new(stdout));
+    handle_config_updates(&stdout_lock).await;
 
-    let mut handles = Vec::new();
+    let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
-    loop {
-        info!("next message");
-        let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
-            info!("failed to read message length (probably browser exit)");
-            break;
-        };
-
-        if length > MSG_LEN_MAX {
-            info!("Message length {length} exceeds max {MSG_LEN_MAX}");
-            continue;
-        }
-
-        let mut buffer = vec![0; length as usize];
-        stdin_lock.read_exact(&mut buffer)?;
-        let request: Result<FromBrowser, _> = serde_json::from_slice(&buffer);
-
-        let stdout_lock = stdout_lock.clone();
-
-        handles.push(task::spawn(async move {
-            if let Ok(message) = request {
-                if let Err(e) = process_message(&*stdout_lock, message).await {
-                    info!("Failed to process message: {e}");
-                }
-            } else {
-                match std::str::from_utf8(&buffer) {
-                    Ok(buffer_str) => info!("failed to parse FromBrowser: {}", buffer_str),
-                    Err(_) => info!("failed to parse FromBrowser: {:?}", buffer),
-                }
-            }
-        }));
-    }
+    handle_client_messages(&mut handles, &mut stdin_lock, &stdout_lock).await?;
 
     for handle in handles {
         handle.await?;
@@ -99,7 +47,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn process_message(stdout_lock: &Mutex<std::io::Stdout>, request: FromBrowser) -> Result<()> {
+async fn handle_config_updates(stdout_lock: &Arc<Mutex<io::Stdout>>) {
+    let stdout_lock = stdout_lock.clone();
+
+    // Task will never complete
+    tokio::spawn(async move {
+        let mut socket = zeromq::SubSocket::new();
+        socket
+            .connect("tcp://127.0.0.1:5556")
+            .await
+            .expect("Failed to connect");
+
+        socket.subscribe("").await.expect("Failed to subscribe");
+
+        loop {
+            info!("Message");
+            let repl = socket.recv().await.expect("failed to recieve");
+            info!("Received: {:?}", repl);
+            send_response(&*stdout_lock, &ToBrowser::Test)
+                .await
+                .expect("failed to send response");
+        }
+    });
+}
+
+async fn handle_client_messages(
+    handles: &mut Vec<JoinHandle<()>>,
+    stdin_lock: &mut io::StdinLock<'_>,
+    stdout_lock: &Arc<Mutex<io::Stdout>>,
+) -> Result<()> {
+    loop {
+        info!("next message");
+        let request = match recv_request(stdin_lock).await? {
+            Ok(request) => request,
+            Err(ControlFlow::Continue(())) => continue,
+            Err(ControlFlow::Break(())) => break,
+        };
+
+        let stdout_lock = stdout_lock.clone();
+
+        handles.push(task::spawn(async move {
+            if let Err(e) = process_message(&*stdout_lock, request).await {
+                info!("Failed to process message: {e}");
+            }
+        }));
+    }
+
+    Ok(())
+}
+
+async fn recv_request(
+    stdin_lock: &mut io::StdinLock<'_>,
+) -> Result<Result<FromBrowser, ControlFlow<()>>> {
+    let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
+        info!("failed to read message length (probably browser exit)");
+        return Ok(Err(ControlFlow::Break(())));
+    };
+
+    if length > MSG_LEN_MAX {
+        info!("Message length {length} exceeds max {MSG_LEN_MAX}");
+        return Ok(Err(ControlFlow::Continue(())));
+    }
+
+    let mut buffer = vec![0; length as usize];
+    stdin_lock.read_exact(&mut buffer)?;
+    let request: FromBrowser = serde_json::from_slice(&buffer).expect("failed to parse");
+
+    Ok(Ok(request))
+}
+
+async fn send_response(stdout_lock: &Mutex<io::Stdout>, response: &ToBrowser) -> Result<()> {
+    let response_string = to_string(response)?;
+    let response_length = u32::try_from(response_string.len())?;
+
+    let mut stdout = stdout_lock.lock().await;
+
+    stdout.write_u32::<NativeEndian>(response_length)?;
+    stdout.write_all(response_string.as_bytes())?;
+    stdout.flush()?;
+    Ok(())
+}
+
+async fn process_message(stdout_lock: &Mutex<io::Stdout>, request: FromBrowser) -> Result<()> {
     tokio::time::sleep(random_duration()).await;
 
     match request {
@@ -131,20 +160,8 @@ fn random_duration() -> Duration {
     file.read_exact(&mut buf).unwrap();
     let number = buf[0];
 
-    let number = number as u64 * 5 + 500;
+    let number = number as u64 * 3 + 200;
     info!("sleep duration: {}", number);
 
     Duration::from_millis(number)
-}
-
-async fn send_response(stdout_lock: &Mutex<std::io::Stdout>, response: &ToBrowser) -> Result<()> {
-    let response_string = to_string(response)?;
-    let response_length = u32::try_from(response_string.len())?;
-
-    let mut stdout = stdout_lock.lock().await;
-
-    stdout.write_u32::<NativeEndian>(response_length)?;
-    stdout.write_all(response_string.as_bytes())?;
-    stdout.flush()?;
-    Ok(())
 }
