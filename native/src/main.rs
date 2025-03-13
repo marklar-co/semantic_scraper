@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use log::{info, LevelFilter};
 use serde_json::to_string;
 use simplelog::{Config, WriteLogger};
@@ -99,7 +98,7 @@ async fn handle_client_messages(
 async fn recv_request(
     stdin_lock: &mut io::StdinLock<'_>,
 ) -> Result<Result<FromBrowser, ControlFlow<()>>> {
-    let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
+    let Ok(length) = read_ne_u32(stdin_lock) else {
         info!("failed to read message length (probably browser exit)");
         return Ok(Err(ControlFlow::Break(())));
     };
@@ -122,10 +121,27 @@ async fn send_response(stdout_lock: &Mutex<io::Stdout>, response: &ToBrowser) ->
 
     let mut stdout = stdout_lock.lock().await;
 
-    stdout.write_u32::<NativeEndian>(response_length)?;
+    write_ne_u32(&mut *stdout, response_length)?;
     stdout.write_all(response_string.as_bytes())?;
     stdout.flush()?;
     Ok(())
+}
+
+fn write_ne_u32<W>(writer: &mut W, value: u32) -> io::Result<()>
+where
+    W: Write,
+{
+    let buf = value.to_ne_bytes();
+    writer.write_all(&buf)
+}
+
+fn read_ne_u32<R>(reader: &mut R) -> io::Result<u32>
+where
+    R: Read,
+{
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf)?;
+    Ok(u32::from_ne_bytes(buf))
 }
 
 async fn process_message(stdout_lock: &Mutex<io::Stdout>, request: FromBrowser) -> Result<()> {
