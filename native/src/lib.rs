@@ -20,6 +20,6 @@ pub enum FromBrowser {
 pub enum ToBrowser {
     Pong { req_id: u64 },
     ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConf { key: String, val: String },
+    UpdateConfig { key: String, value: String },
     Test,
 }

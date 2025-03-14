@@ -16,8 +16,13 @@ function connectNative() {
 }
 
 function onNativeMessage(message) {
-    console.log('Received message from native app:', message);
-    // Handle the message from the native app
+    if (message.type === "Pong") {
+        console.log("Pong!", message.req_id);
+    } else if (message.type === "UpdateConfig") {
+        console.log("Update config:", message.key, "=", message.value);
+    } else {
+        console.error("Unknown message:", message)
+    }
 }
 
 function onDisconnected() {
@@ -66,3 +71,4 @@ chrome.runtime.onStartup.addListener(() => {
         //
     }, 1000); // Delay to ensure connection is established
 });
+

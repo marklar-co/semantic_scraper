@@ -10,17 +10,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Start sending loop");
     loop {
-        let zipcode = random_int(10000, 10010);
-        let temperature = random_int(-80, 135);
-        let relhumidity = random_int(10, 60);
-        socket
-            .send(format!("{} {} {}", zipcode, temperature, relhumidity).into())
-            .await?;
+        let key = random_choice(&["foo", "bar", "baz"]);
+        let value = random_choice(&[4, 824, 28, 2]);
+        socket.send(format!("{}={}", key, value).into()).await?;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
-fn random_int(min: i32, max: i32) -> i32 {
+fn random_choice<T>(list: &[T]) -> &T {
+    &list[random_int(0, list.len() - 1)]
+}
+
+fn random_int(min: usize, max: usize) -> usize {
     assert!(min <= max);
 
     use std::io::Read as _;
@@ -29,9 +30,9 @@ fn random_int(min: i32, max: i32) -> i32 {
         .create(false)
         .open("/dev/urandom")
         .unwrap();
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; size_of::<usize>()];
     file.read_exact(&mut buf).unwrap();
-    let number = i32::from_be_bytes(buf);
+    let number = usize::from_be_bytes(buf);
 
-    (number.abs() % (max - min + 1)) + min
+    number % (max - min + 1) + min
 }
