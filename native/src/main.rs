@@ -8,7 +8,7 @@ use anyhow::Result;
 use log::{info, LevelFilter};
 use serde_json::to_string;
 use simplelog::{Config, WriteLogger};
-use zeromq::{Socket as _, SocketRecv as _};
+use zeromq::{Socket as _, SocketRecv as _, ZmqMessage};
 
 use tokio::sync::Mutex;
 use tokio::task::{self, JoinHandle};
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }));
 
-    info!("nativeex started");
+    info!("Start nativeext");
 
     let mut stdin_lock = io::stdin().lock();
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
@@ -58,16 +58,45 @@ async fn handle_config_updates(stdout_lock: &Arc<Mutex<io::Stdout>>) {
             .expect("Failed to connect");
 
         socket.subscribe("").await.expect("Failed to subscribe");
+        info!("Subscribed to config server");
 
         loop {
-            info!("Message");
-            let repl = socket.recv().await.expect("failed to recieve");
-            info!("Received: {:?}", repl);
-            send_response(&*stdout_lock, &ToBrowser::Test)
+            let message = socket.recv().await.expect("failed to recieve");
+            let string = message_to_string(message).expect("failed to convert message to string");
+
+            let (key, value) = split_key_value(&string)
+                .expect("failed to convert message string to key-value pair");
+            let (key, value) = (key.to_string(), value.to_string());
+
+            info!("Update config: `{}={}`", key, value);
+
+            send_response(&*stdout_lock, &ToBrowser::UpdateConfig { key, value })
                 .await
                 .expect("failed to send response");
         }
     });
+}
+
+fn message_to_string(message: ZmqMessage) -> Option<String> {
+    let bytes = message.get(0)?.to_vec();
+    let string = String::from_utf8(bytes).ok()?;
+    Some(string)
+}
+
+fn split_key_value(string: &str) -> Option<(&str, &str)> {
+    let index = string.find('=')?;
+    let (key, value) = string.split_at(index);
+
+    let mut value = value.chars();
+    value.next();
+    let value = value.as_str();
+
+    let (key, value) = (key.trim(), value.trim());
+    if key.is_empty() || value.is_empty() {
+        return None;
+    }
+
+    Some((key, value))
 }
 
 async fn handle_client_messages(
@@ -76,19 +105,27 @@ async fn handle_client_messages(
     stdout_lock: &Arc<Mutex<io::Stdout>>,
 ) -> Result<()> {
     loop {
-        info!("next message");
         let request = match recv_request(stdin_lock).await? {
             Ok(request) => request,
             Err(ControlFlow::Continue(())) => continue,
             Err(ControlFlow::Break(())) => break,
         };
+        info!("Recieved request: {:?}", request);
 
         let stdout_lock = stdout_lock.clone();
 
         handles.push(task::spawn(async move {
-            if let Err(e) = process_message(&*stdout_lock, request).await {
-                info!("Failed to process message: {e}");
-            }
+            let response = match process_message(request).await {
+                Ok(response) => response,
+                Err(err) => {
+                    info!("Failed to process message: {}", err);
+                    return;
+                }
+            };
+
+            send_response(&*stdout_lock, &response)
+                .await
+                .expect("Failed to send response");
         }));
     }
 
@@ -99,7 +136,7 @@ async fn recv_request(
     stdin_lock: &mut io::StdinLock<'_>,
 ) -> Result<Result<FromBrowser, ControlFlow<()>>> {
     let Ok(length) = read_ne_u32(stdin_lock) else {
-        info!("failed to read message length (probably browser exit)");
+        info!("Failed to read message length (probably browser exit)");
         return Ok(Err(ControlFlow::Break(())));
     };
 
@@ -127,6 +164,26 @@ async fn send_response(stdout_lock: &Mutex<io::Stdout>, response: &ToBrowser) ->
     Ok(())
 }
 
+async fn process_message(request: FromBrowser) -> Result<ToBrowser> {
+    tokio::time::sleep(random_duration()).await;
+
+    match request {
+        FromBrowser::Ping { req_id } => {
+            info!("Ping received from browser");
+            Ok(ToBrowser::Pong { req_id })
+        }
+
+        FromBrowser::GetTextTopics {
+            req_id,
+            url: _,
+            text: _,
+        } => {
+            let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
+            Ok(ToBrowser::ReturnTextTopics { req_id, topics })
+        }
+    }
+}
+
 fn write_ne_u32<W>(writer: &mut W, value: u32) -> io::Result<()>
 where
     W: Write,
@@ -144,27 +201,6 @@ where
     Ok(u32::from_ne_bytes(buf))
 }
 
-async fn process_message(stdout_lock: &Mutex<io::Stdout>, request: FromBrowser) -> Result<()> {
-    tokio::time::sleep(random_duration()).await;
-
-    match request {
-        FromBrowser::Ping { req_id } => {
-            info!("ping received from browser");
-            send_response(stdout_lock, &ToBrowser::Pong { req_id }).await?;
-        }
-        FromBrowser::GetTextTopics {
-            req_id,
-            url: _,
-            text: _,
-        } => {
-            let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
-            send_response(stdout_lock, &ToBrowser::ReturnTextTopics { req_id, topics }).await?;
-        }
-    }
-
-    Ok(())
-}
-
 fn random_duration() -> Duration {
     use std::io::Read as _;
     let mut file = std::fs::OpenOptions::new()
@@ -177,7 +213,6 @@ fn random_duration() -> Duration {
     let number = buf[0];
 
     let number = number as u64 * 3 + 200;
-    info!("sleep duration: {}", number);
 
     Duration::from_millis(number)
 }
