@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let key = random_choice(&["foo", "bar", "baz"]);
         let value = random_choice(&[4, 824, 28, 2]);
         socket.send(format!("{}={}", key, value).into()).await?;
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(2000)).await;
     }
 }
 

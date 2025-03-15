@@ -1,25 +1,47 @@
+const config = {};
+
+let port = null;
+let req_id = 7;
+
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    if (request.action === 'ping') {
+    console.log(request.from);
+    if (request.action === "ping") {
         runPingTest();
         sendResponse("pong");
     }
 });
 
-let port = null;
-let req_id = 7;
+// Example usage
+chrome.runtime.onInstalled.addListener(() => {
+    connectNative();
+    setTimeout(() => {
+        runPingTest();
+        runGetTextTopicsTest();
+    }, 1000); // Delay to ensure connection is established
+});
+
+chrome.runtime.onStartup.addListener(() => {
+    connectNative();
+    setTimeout(() => {
+        runGetTextTopicsTest();
+    }, 1000); // Delay to ensure connection is established
+});
 
 function connectNative() {
     console.log("Connecting to native app");
-    port = chrome.runtime.connectNative('ai.chamomile.nativeext');
+    port = chrome.runtime.connectNative("ai.chamomile.nativeext");
     port.onMessage.addListener(onNativeMessage);
     port.onDisconnect.addListener(onDisconnected);
 }
 
 function onNativeMessage(message) {
     if (message.type === "Pong") {
-        console.log("Pong!", message.req_id);
+        console.log("Pong:", message.req_id);
     } else if (message.type === "UpdateConfig") {
-        console.log("Update config:", message.key, "=", message.value);
+        config[message.key] = message.value;
+        console.log("Config:", message.key, "=", message.value, config);
+    } else if (message.type === "ReturnTextTopics") {
+        console.log("Text topics:", message.req_id, message.topics);
     } else {
         console.error("Unknown message:", message)
     }
@@ -34,41 +56,28 @@ function onDisconnected() {
     port = null;
 }
 
+function runGetTextTopicsTest() {
+    postMessageNative({
+        type: "GetTextTopics",
+        req_id: req_id++,
+        url: "https://example.com",
+        text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
+    });
+}
+
 function runPingTest() {
     for (let i = 0; i < 10; ++i) {
-        sendPing();
+        postMessageNative({
+            type: "Ping",
+            req_id: req_id++
+        });
     }
 }
 
-function sendPing() {
+function postMessageNative(message) {
     if (!port) {
-        console.error('Native app is not connected');
+        console.error("Native app is not connected");
         return;
     }
-
-    const message = {
-        type: 'Ping',
-        req_id: req_id++
-    };
-
-    console.log('Sending message to native app:', message);
     port.postMessage(message);
-    console.log('Message sent to native app');
 }
-
-// Example usage
-chrome.runtime.onInstalled.addListener(() => {
-    connectNative();
-    setTimeout(() => {
-        runPingTest();
-        //
-    }, 1000); // Delay to ensure connection is established
-});
-
-chrome.runtime.onStartup.addListener(() => {
-    connectNative();
-    setTimeout(() => {
-        //
-    }, 1000); // Delay to ensure connection is established
-});
-
