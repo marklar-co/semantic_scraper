@@ -3,11 +3,13 @@ const config = {};
 let port = null;
 let req_id = 7;
 
-chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-    console.log(request.from);
-    if (request.action === "ping") {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message.action === "ping") {
         runPingTest();
-        sendResponse("pong");
+    } else if (message.action === "getTopics") {
+        runGetTextTopicsTest();
+    } else {
+        console.error("Unknown local message:", message);
     }
 });
 
@@ -36,14 +38,14 @@ function connectNative() {
 
 function onNativeMessage(message) {
     if (message.type === "Pong") {
-        console.log("Pong:", message.req_id);
+        console.log("RECIEVED Pong:", message.req_id);
     } else if (message.type === "UpdateConfig") {
         config[message.key] = message.value;
-        console.log("Config:", message.key, "=", message.value, config);
+        console.log("RECIEVED Config:", message.key, "=", message.value, config);
     } else if (message.type === "ReturnTextTopics") {
-        console.log("Text topics:", message.req_id, message.topics);
+        console.log("RECIEVED Text topics:", message.req_id, message.topics);
     } else {
-        console.error("Unknown message:", message)
+        console.error("Unknown native message:", message)
     }
 }
 
@@ -57,21 +59,48 @@ function onDisconnected() {
 }
 
 function runGetTextTopicsTest() {
-    postMessageNative({
-        type: "GetTextTopics",
-        req_id: req_id++,
-        url: "https://example.com",
-        text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.",
-    });
+    const requests = [
+        {
+            url: "https://lorem.com/index.html",
+            text: "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+        },
+        {
+            url: "https://emptytext.com",
+            text: "",
+        },
+        {
+            url: "https://longtext.com",
+            text: "Lorem ipsum ".repeat(100) + "dolor sit amet.",
+        },
+        {
+            url: "https://vitae.com",
+            text: " vitae  interdum, posuere ullamcorper ac ac sit amet justo. curabitur Posuere  et ",
+        },
+        {
+            url: "https://foreign.lang.com",
+            text: "这是.一个中文测.试文本",
+        },
+        {
+            url: "https://whitespace.com",
+            text: "  \n \n ",
+        },
+    ];
+
+    for (const { url, text } of requests) {
+        postMessageNative({
+            type: "GetTextTopics",
+            req_id: req_id++,
+            url,
+            text,
+        });
+    }
 }
 
 function runPingTest() {
-    for (let i = 0; i < 10; ++i) {
-        postMessageNative({
-            type: "Ping",
-            req_id: req_id++
-        });
-    }
+    postMessageNative({
+        type: "Ping",
+        req_id: req_id++
+    });
 }
 
 function postMessageNative(message) {

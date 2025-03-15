@@ -1,10 +1,8 @@
 document.getElementById("pingButton").addEventListener("click", function() {
-    sendPing();
+    chrome.runtime.sendMessage({ action: "ping" }, _response => { });
 });
 
-function sendPing() {
-    chrome.runtime.sendMessage({ action: "ping" }, response => {
-        console.log("response:", response);
-    });
-}
+document.getElementById("getTopicsButton").addEventListener("click", function() {
+    chrome.runtime.sendMessage({ action: "getTopics" }, _response => { });
+});
 
