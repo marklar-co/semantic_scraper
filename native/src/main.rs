@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use log::{info, LevelFilter};
-use serde_json::to_string;
+use serde_json::{to_string, Value};
 use simplelog::{Config, WriteLogger};
 use zeromq::{Socket as _, SocketRecv as _, ZmqMessage};
 
@@ -66,7 +66,8 @@ async fn handle_config_updates(stdout_lock: &Arc<Mutex<io::Stdout>>) {
 
             let (key, value) = split_key_value(&string)
                 .expect("failed to convert message string to key-value pair");
-            let (key, value) = (key.to_string(), value.to_string());
+            let value: Value = serde_json::from_str(value).expect("failed to deserialize value");
+            let (key, value) = (key.to_string(), value);
 
             info!("Update config: `{}={}`", key, value);
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -20,6 +21,6 @@ pub enum FromBrowser {
 pub enum ToBrowser {
     Pong { req_id: u64 },
     ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConfig { key: String, value: String },
+    UpdateConfig { key: String, value: Value },
     Test,
 }

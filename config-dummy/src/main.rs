@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use serde_json::Value;
 use zeromq::*;
 
 #[tokio::main]
@@ -11,7 +12,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Start sending loop");
     loop {
         let key = random_choice(&["foo", "bar", "baz"]);
-        let value = random_choice(&[4, 824, 28, 2]);
+
+        let values = [Value::from(4), Value::from("something"), Value::from(24)];
+        let value = random_choice(&values);
+
         socket.send(format!("{}={}", key, value).into()).await?;
         tokio::time::sleep(Duration::from_millis(2000)).await;
     }
