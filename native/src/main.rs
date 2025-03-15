@@ -1,5 +1,4 @@
 use std::io::{self, Read, Write};
-use std::ops::ControlFlow;
 use std::panic;
 use std::sync::Arc;
 use std::time::Duration;
@@ -107,9 +106,12 @@ async fn handle_client_messages(
 ) -> Result<()> {
     loop {
         let request = match recv_request(stdin_lock).await? {
-            Ok(request) => request,
-            Err(ControlFlow::Continue(())) => continue,
-            Err(ControlFlow::Break(())) => break,
+            Request::Ok(request) => request,
+            Request::Err => continue,
+            Request::EOF => {
+                info!("End of input. Exiting event loop.");
+                break;
+            }
         };
         info!("Recieved request: {:?}", request);
 
@@ -133,24 +135,27 @@ async fn handle_client_messages(
     Ok(())
 }
 
-async fn recv_request(
-    stdin_lock: &mut io::StdinLock<'_>,
-) -> Result<Result<FromBrowser, ControlFlow<()>>> {
+enum Request {
+    Ok(FromBrowser),
+    Err,
+    EOF,
+}
+
+async fn recv_request(stdin_lock: &mut io::StdinLock<'_>) -> Result<Request> {
     let Ok(length) = read_ne_u32(stdin_lock) else {
-        info!("Failed to read message length (probably browser exit)");
-        return Ok(Err(ControlFlow::Break(())));
+        return Ok(Request::EOF);
     };
 
     if length > MSG_LEN_MAX {
         info!("Message length {length} exceeds max {MSG_LEN_MAX}");
-        return Ok(Err(ControlFlow::Continue(())));
+        return Ok(Request::Err);
     }
 
     let mut buffer = vec![0; length as usize];
     stdin_lock.read_exact(&mut buffer)?;
     let request: FromBrowser = serde_json::from_slice(&buffer).expect("failed to parse");
 
-    Ok(Ok(request))
+    Ok(Request::Ok(request))
 }
 
 async fn send_response(stdout_lock: &Mutex<io::Stdout>, response: &ToBrowser) -> Result<()> {
@@ -174,15 +179,48 @@ async fn process_message(request: FromBrowser) -> Result<ToBrowser> {
             Ok(ToBrowser::Pong { req_id })
         }
 
-        FromBrowser::GetTextTopics {
-            req_id,
-            url: _,
-            text: _,
-        } => {
-            let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
+        FromBrowser::GetTextTopics { req_id, url, text } => {
+            info!("GetTextTopics received from browser");
+            let topics = get_text_topics_dummy(url, text);
             Ok(ToBrowser::ReturnTextTopics { req_id, topics })
         }
     }
+}
+
+fn get_text_topics_dummy(url: String, text: String) -> Vec<String> {
+    let domain = url
+        .splitn(2, "://")
+        .nth(1)
+        .unwrap_or(&url)
+        .splitn(2, '/')
+        .next()
+        .unwrap_or(&url);
+
+    let mut topics = Vec::new();
+    topics.push(format!("FROM {}", domain));
+
+    let sentences = text.split('.');
+    for sentence in sentences {
+        let mut words = sentence
+            .split_whitespace()
+            .map(|word| word.trim())
+            .filter(|word| !word.is_empty());
+
+        let Some(topic) = words.next() else {
+            continue;
+        };
+        let mut topic = topic.to_uppercase();
+
+        if let Some(next) = words.next() {
+            topic += " ";
+            topic += &next.to_lowercase();
+        }
+
+        topics.push(topic);
+    }
+
+    topics.push("END".to_string());
+    topics
 }
 
 fn write_ne_u32<W>(writer: &mut W, value: u32) -> io::Result<()>
@@ -203,17 +241,7 @@ where
 }
 
 fn random_duration() -> Duration {
-    use std::io::Read as _;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .create(false)
-        .open("/dev/urandom")
-        .unwrap();
-    let mut buf = [0u8; 1];
-    file.read_exact(&mut buf).unwrap();
-    let number = buf[0];
-
+    let number = std::time::Instant::now().elapsed().as_nanos() % 256;
     let number = number as u64 * 3 + 200;
-
     Duration::from_millis(number)
 }
