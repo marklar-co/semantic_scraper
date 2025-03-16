@@ -9,12 +9,14 @@ use serde_json::{to_string, Value};
 use simplelog::{Config, WriteLogger};
 use zeromq::{Socket as _, SocketRecv as _, ZmqMessage};
 
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::{self, JoinHandle};
 
 use nativeext::{FromBrowser, ToBrowser};
 
 const MSG_LEN_MAX: u32 = 8 * 1024;
+
+const CHANNEL_CAPACITY: usize = 32;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,25 +31,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Start nativeext");
 
-    let mut stdin_lock = io::stdin().lock();
+    // let mut stdin_lock = io::stdin().lock();
+    let stdin_lock = Arc::new(Mutex::new(io::stdin()));
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
 
-    handle_config_updates(&stdout_lock).await;
+    let (tx, mut rx) = mpsc::channel::<ToBrowser>(CHANNEL_CAPACITY);
+    let (tx2, mut rx2) = mpsc::channel::<ToBrowser>(CHANNEL_CAPACITY);
+
+    handle_config_updates(tx2).await;
 
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
-    handle_client_messages(&mut handles, &mut stdin_lock, &stdout_lock).await?;
+    handle_client_messages(&mut handles, tx, stdin_lock).await?;
+
+    info!("entering loop...");
+    loop {
+        let Some(response) = next_message(&mut rx, &mut rx2).await else {
+            info!("EXITING LOOP!");
+            break;
+        };
+
+        send_response(&*stdout_lock, &response)
+            .await
+            .expect("failed to send response");
+    }
 
     for handle in handles {
         handle.await?;
     }
 
+    info!("CLOSING MAIN THREAD");
     Ok(())
 }
 
-async fn handle_config_updates(stdout_lock: &Arc<Mutex<io::Stdout>>) {
-    let stdout_lock = stdout_lock.clone();
+async fn next_message(
+    rx: &mut mpsc::Receiver<ToBrowser>,
+    rx2: &mut mpsc::Receiver<ToBrowser>,
+) -> Option<ToBrowser> {
+    if rx.is_closed() {
+        info!("rx closed!!!!!");
+        return None;
+    }
 
+    tokio::select! {
+        Some(response) = rx2.recv() => {
+            info!("recieved rx2 message: {:?}", response);
+            return Some(response);
+        }
+
+        Some(response) = rx.recv() => {
+            info!("recieved rx message: {:?}", response);
+            return Some(response);
+        }
+
+        else => {
+            info!("no more messages!!!");
+            return None
+        }
+    };
+}
+
+async fn handle_config_updates(tx: mpsc::Sender<ToBrowser>) {
     // Task will never complete
     tokio::spawn(async move {
         let mut socket = zeromq::SubSocket::new();
@@ -70,9 +114,8 @@ async fn handle_config_updates(stdout_lock: &Arc<Mutex<io::Stdout>>) {
 
             info!("Update config: `{}={}`", key, value);
 
-            send_response(&*stdout_lock, &ToBrowser::UpdateConfig { key, value })
-                .await
-                .expect("failed to send response");
+            let response = ToBrowser::UpdateConfig { key, value };
+            tx.send(response).await.expect("failed to send message");
         }
     });
 }
@@ -101,36 +144,48 @@ fn split_key_value(string: &str) -> Option<(&str, &str)> {
 
 async fn handle_client_messages(
     handles: &mut Vec<JoinHandle<()>>,
-    stdin_lock: &mut io::StdinLock<'_>,
-    stdout_lock: &Arc<Mutex<io::Stdout>>,
+    tx: mpsc::Sender<ToBrowser>,
+    stdin_lock: Arc<Mutex<io::Stdin>>,
+    // stdout_lock: &Arc<Mutex<io::Stdout>>,
 ) -> Result<()> {
-    loop {
-        let request = match recv_request(stdin_lock).await? {
-            Request::Ok(request) => request,
-            Request::Err => continue,
-            Request::EOF => {
-                info!("End of input. Exiting event loop.");
-                break;
-            }
-        };
-        info!("Recieved request: {:?}", request);
+    task::spawn(async move {
+        loop {
+            let stdin_lock = stdin_lock.clone();
 
-        let stdout_lock = stdout_lock.clone();
-
-        handles.push(task::spawn(async move {
-            let response = match process_message(request).await {
-                Ok(response) => response,
-                Err(err) => {
-                    info!("Failed to process message: {}", err);
-                    return;
+            let request = match recv_request(&*stdin_lock).await.unwrap() {
+                Request::Ok(request) => request,
+                Request::Err => continue,
+                Request::EOF => {
+                    info!("End of input");
+                    // tx.send(Message::Close)
+                    //     .await
+                    //     .expect("failed to send message");
+                    break;
                 }
             };
+            info!("Recieved request: {:?}", request);
 
-            send_response(&*stdout_lock, &response)
-                .await
-                .expect("Failed to send response");
-        }));
-    }
+            // let stdout_lock = stdout_lock.clone();
+            let tx = tx.clone();
+
+            task::spawn(async move {
+                let response = match process_message(request).await {
+                    Ok(response) => response,
+                    Err(err) => {
+                        info!("Failed to process message: {}", err);
+                        return;
+                    }
+                };
+
+                info!("sending message...");
+                tx.send(response).await.expect("failed to send message");
+
+                // send_response(&*stdout_lock, &response)
+                //     .await
+                //     .expect("Failed to send response");
+            });
+        }
+    });
 
     Ok(())
 }
@@ -141,8 +196,10 @@ enum Request {
     EOF,
 }
 
-async fn recv_request(stdin_lock: &mut io::StdinLock<'_>) -> Result<Request> {
-    let Ok(length) = read_ne_u32(stdin_lock) else {
+async fn recv_request(stdin_lock: &Mutex<io::Stdin>) -> Result<Request> {
+    let mut stdin = stdin_lock.lock().await;
+
+    let Ok(length) = read_ne_u32(&mut *stdin) else {
         return Ok(Request::EOF);
     };
 
@@ -152,7 +209,7 @@ async fn recv_request(stdin_lock: &mut io::StdinLock<'_>) -> Result<Request> {
     }
 
     let mut buffer = vec![0; length as usize];
-    stdin_lock.read_exact(&mut buffer)?;
+    stdin.read_exact(&mut buffer)?;
     let request: FromBrowser = serde_json::from_slice(&buffer).expect("failed to parse");
 
     Ok(Request::Ok(request))
