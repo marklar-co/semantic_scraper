@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::io::Write;
 use std::process::{Child, Command, Stdio};
 
-use nativeext::{FromBrowser, ToBrowser};
+use nativeext::{Request, Response};
 
 const BIN_PATH: &str = env!(concat!("CARGO_BIN_EXE_", env!("CARGO_PKG_NAME")));
 
@@ -23,8 +23,8 @@ impl BinaryProgram {
 
     pub fn expect_response<A, B>(input: A, expected: B)
     where
-        A: IntoIterator<Item = FromBrowser> + Send + Debug + 'static,
-        B: IntoIterator<Item = ToBrowser> + Send + Debug + Clone + 'static,
+        A: IntoIterator<Item = Request> + Send + Debug + 'static,
+        B: IntoIterator<Item = Response> + Send + Debug + Clone + 'static,
     {
         let mut output = BinaryProgram::new().send(input).receive();
 
@@ -46,7 +46,7 @@ impl BinaryProgram {
 
     fn send<A>(mut self, messages: A) -> Self
     where
-        A: IntoIterator<Item = FromBrowser> + Send + 'static,
+        A: IntoIterator<Item = Request> + Send + 'static,
     {
         let mut stdin = self.child.stdin.take().expect("Failed to open stdin");
         std::thread::spawn(move || {
@@ -59,7 +59,7 @@ impl BinaryProgram {
         self
     }
 
-    fn receive(self) -> Vec<ToBrowser> {
+    fn receive(self) -> Vec<Response> {
         let mut bytes = self.receive_raw().into_iter().peekable();
         let mut responses = Vec::new();
         while bytes.peek().is_some() {

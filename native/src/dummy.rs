@@ -2,7 +2,9 @@ use std::time::{Duration, Instant};
 
 use tokio::time;
 
-pub async fn simulate_random_sleep() {
+pub const CONFIG_SERVER_ENDPOINT: &str = "tcp://127.0.0.1:5556";
+
+pub async fn random_sleep() {
     let number = Instant::now().elapsed().as_nanos() % 256;
     let number = number as u64 * 3 + 200;
     let duration = Duration::from_millis(number);
