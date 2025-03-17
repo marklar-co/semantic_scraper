@@ -44,6 +44,8 @@ function onNativeMessage(message) {
         console.log("RECIEVED Config:", message.key, "=", message.value, config);
     } else if (message.type === "ReturnTextTopics") {
         console.log("RECIEVED Text topics:", message.req_id, message.topics);
+    } else if (message.type === "Error") {
+        console.error("RECIEVED ERROR:", message.req_id, message.error);
     } else {
         console.error("Unknown native message:", message)
     }
