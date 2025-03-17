@@ -4,7 +4,7 @@ use serde_json::Value;
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[derive(Debug, PartialEq)]
-pub enum FromBrowser {
+pub enum Request {
     Ping {
         req_id: u64,
     },
@@ -18,7 +18,7 @@ pub enum FromBrowser {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[derive(Clone, Debug, PartialEq)]
-pub enum ToBrowser {
+pub enum Response {
     Pong {
         req_id: u64,
     },
@@ -39,9 +39,37 @@ pub enum ToBrowser {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ErrorKind {
-    FailedToConnectConfig,
-    FailedToProcessRequest,
-    FailedToReceiveRequest,
+    Stdin,
+    Stdout,
+
+    ConfigConnect,
+    ConfigSubscribe,
+    ConfigReceive,
+
+    ConfigResponseSize,
+    ConfigResponseDecode,
+    ConfigResponseDeserialize,
+
+    ClientRequestSize,
+    ClientRequestDeserialize,
+
+    ClientResponseSend,
+    ClientResponseSize,
+    ClientResponseSerialize,
+
+    ClientProcess,
+
+    // TODO(feat): Replace instances with real variants
+    Generic,
+}
+
+impl From<ErrorKind> for Response {
+    fn from(error: ErrorKind) -> Self {
+        Self::Error {
+            req_id: None,
+            error,
+        }
+    }
 }
