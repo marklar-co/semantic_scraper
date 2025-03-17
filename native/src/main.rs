@@ -1,5 +1,6 @@
 mod config;
 mod dummy;
+mod log_file;
 mod request;
 
 use std::io;
@@ -12,6 +13,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task;
 
 use crate::config::run_config_handler;
+use crate::log_file::LogFile;
 use crate::request::{run_request_loop, send_response};
 use nativeext::{ErrorKind, Response};
 
@@ -19,10 +21,9 @@ const CHANNEL_CAPACITY: usize = 32;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // TODO(feat): Write to a log file
-    WriteLogger::init(LevelFilter::Info, Config::default(), io::stderr())?;
-
     info!("Start nativeext");
+
+    WriteLogger::init(LevelFilter::Info, Config::default(), LogFile::new())?;
 
     // Create all resources here, even if not shared
 
