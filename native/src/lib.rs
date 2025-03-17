@@ -17,10 +17,31 @@ pub enum FromBrowser {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ToBrowser {
-    Pong { req_id: u64 },
-    ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConfig { key: String, value: Value },
-    Test,
+    Pong {
+        req_id: u64,
+    },
+    ReturnTextTopics {
+        req_id: u64,
+        topics: Vec<String>,
+    },
+    UpdateConfig {
+        key: String,
+        value: Value,
+    },
+
+    Error {
+        req_id: Option<u64>,
+        error: ErrorKind,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type")]
+#[derive(Clone, Debug, PartialEq)]
+pub enum ErrorKind {
+    FailedToConnectConfig,
+    FailedToProcessRequest,
+    FailedToReceiveRequest,
 }

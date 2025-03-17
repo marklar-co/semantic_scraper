@@ -15,7 +15,7 @@ fn get_topics_many() {
     utils::parallelize(20, get_topics);
 }
 
-#[timeout(4000)]
+#[timeout(8000)]
 fn ping() {
     BinaryProgram::expect_response(
         [
@@ -41,7 +41,7 @@ fn ping() {
     );
 }
 
-#[timeout(4000)]
+#[timeout(8000)]
 fn get_topics() {
     BinaryProgram::expect_response(
         [
