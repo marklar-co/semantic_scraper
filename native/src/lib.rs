@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -28,7 +27,7 @@ pub enum Response {
     },
     UpdateConfig {
         key: String,
-        value: Value,
+        value: String,
     },
 
     Error {
