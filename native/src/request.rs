@@ -19,6 +19,7 @@ const MAX_RESPONSE_LEN: u32 = 4_000_000_000;
 ///
 /// Loop breaks when stdin reaches EOF.
 pub async fn run_handler(tx: Sender<Response>, mut stdin: io::Stdin) {
+    info!("Starting request handler");
     // Cannot lock stdin here, as it would be locked across `.await` point.
     // Lock stdin in each (synchronous) `recv_request` call
     loop {
@@ -29,12 +30,11 @@ pub async fn run_handler(tx: Sender<Response>, mut stdin: io::Stdin) {
                 break;
             }
             Err(error) => {
-                error!("failed to recieve message {:?}", error);
+                error!("Failed to recieve request: {:?}", error);
                 send_response_message(&tx, error.into()).await;
                 continue;
             }
         };
-        // info!("Recieved request: {:?}", request);
 
         let tx = tx.clone();
         task::spawn(async move {
@@ -48,13 +48,13 @@ async fn process_and_send_response(tx: Sender<Response>, request: Request) {
     let response = match process_request(request).await {
         Ok(response) => response,
         Err(error) => {
-            error!("Failed to process message");
+            error!("Failed to process request: {:?}", error);
             send_response_message(&tx, error).await;
             return;
         }
     };
 
-    info!("sending message...");
+    info!("Sending response: {:?}", response);
     send_response_message(&tx, response).await;
 }
 
@@ -73,6 +73,8 @@ pub async fn write_response(
     if response_length > MAX_RESPONSE_LEN {
         return Err(ErrorKind::ClientResponseSize);
     }
+
+    // FIX!!! Not flushing?
 
     write_ne_u32(stdout_lock, response_length).map_err(|_| ErrorKind::Stdout)?;
     stdout_lock
@@ -95,22 +97,18 @@ fn read_request(stdin: &mut io::Stdin) -> Result<Option<Request>, ErrorKind> {
     };
 
     if length < 1 {
-        error!("Received an empty request");
         return Err(ErrorKind::ClientRequestSize);
     }
     if length > MAX_REQUEST_LEN {
-        error!("Message length {length} exceeds max {MAX_REQUEST_LEN}");
         return Err(ErrorKind::ClientRequestSize);
     }
 
     let mut buffer = vec![0; length as usize];
-    if let Err(error) = stdin.read_exact(&mut buffer) {
-        error!("failed to read from stdin {:?}", error);
+    if stdin.read_exact(&mut buffer).is_err() {
         return Err(ErrorKind::Stdin);
     }
 
     let Ok(request) = serde_json::from_slice::<Request>(&buffer) else {
-        error!("failed to deserialize request");
         return Err(ErrorKind::ClientRequestDeserialize);
     };
 
@@ -125,12 +123,12 @@ async fn process_request(request: Request) -> Result<Response, Response> {
 
     match request {
         Request::Ping { req_id } => {
-            info!("Ping received from browser");
+            info!("Received request: Ping");
             Ok(Response::Pong { req_id })
         }
 
         Request::GetTextTopics { req_id, url, text } => {
-            info!("GetTextTopics received from browser");
+            info!("Received request: GetTextTopics");
             let topics = dummy::get_text_topics(url, text).map_err(|error| Response::Error {
                 req_id: Some(req_id),
                 error,
