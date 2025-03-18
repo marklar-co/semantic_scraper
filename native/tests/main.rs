@@ -2,7 +2,7 @@ mod bin;
 mod utils;
 
 use self::bin::BinaryProgram;
-use nativeext::{Request, Response};
+use nativeext::{ErrorKind, Request, Response};
 use ntest::timeout;
 
 #[test]
@@ -13,6 +13,35 @@ fn ping_many() {
 #[test]
 fn get_topics_many() {
     utils::parallelize(20, get_topics);
+}
+
+#[test]
+#[timeout(2000)]
+fn invalid_topic() {
+    BinaryProgram::expect_response(
+        [
+            Request::GetTextTopics {
+                req_id: 7,
+                url: "".to_string(),
+                text: "".to_string(),
+            },
+            Request::GetTextTopics {
+                req_id: 8,
+                url: "".to_string(),
+                text: "".to_string(),
+            },
+        ],
+        [
+            Response::Error {
+                req_id: Some(7),
+                error: ErrorKind::ClientProcess,
+            },
+            Response::Error {
+                req_id: Some(8),
+                error: ErrorKind::ClientProcess,
+            },
+        ],
+    );
 }
 
 #[timeout(8000)]

@@ -1,6 +1,7 @@
 ///! Placeholder functions and values to demonstrate the native extension functionality.
 use std::time::{Duration, Instant};
 
+use nativeext::ErrorKind;
 use tokio::time;
 
 pub const CONFIG_SERVER_ADDRESS: &str = "tcp://127.0.0.1:5556";
@@ -21,7 +22,11 @@ pub async fn random_sleep() {
 /// Return a list containing the first 2 words of each sentence.
 ///
 /// Includes the domain name of the url at the beginning of the list.
-pub fn get_text_topics(url: String, text: String) -> Vec<String> {
+pub fn get_text_topics(url: String, text: String) -> Result<Vec<String>, ErrorKind> {
+    if url.is_empty() {
+        return Err(ErrorKind::ClientProcess);
+    }
+
     let domain = url
         .splitn(2, "://")
         .nth(1)
@@ -53,5 +58,5 @@ pub fn get_text_topics(url: String, text: String) -> Vec<String> {
         topics.push(topic);
     }
 
-    topics
+    Ok(topics)
 }
