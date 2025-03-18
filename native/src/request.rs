@@ -5,7 +5,7 @@ use anyhow::Result;
 use log::{error, info};
 use nativeext::{ErrorKind, Request, Response};
 use serde_json::to_string;
-use tokio::io::{AsyncReadExt as _, Stdin};
+use tokio::io::{AsyncReadExt, Stdin};
 use tokio::sync::mpsc::Sender;
 use tokio::task;
 
@@ -140,10 +140,13 @@ where
     writer.write_all(&value.to_ne_bytes())
 }
 
-/// Read a `u32` value from a reader, with native endianess.
+/// Read a `u32` value from an `async` reader, with native endianess.
 ///
 /// Returns `Ok(None)` if stdin reached EOF.
-async fn try_read_ne_u32(reader: &mut Stdin) -> io::Result<Option<u32>> {
+async fn try_read_ne_u32<R>(reader: &mut R) -> io::Result<Option<u32>>
+where
+    R: AsyncReadExt + std::marker::Unpin,
+{
     let mut buf = [0u8; 4];
     if let Err(error) = reader.read_exact(&mut buf).await {
         match error.kind() {
