@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
     // Cannot lock stdin here, as it would be locked across `.await` point.
     // Stdin must only be read from inside request reader loop
-    let stdin = io::stdin();
+    let stdin = tokio::io::stdin();
     // Lock stdout only once, since it must only be written to inside main event loop.
     let stdout = io::stdout().lock();
 

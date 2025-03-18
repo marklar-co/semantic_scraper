@@ -1,10 +1,11 @@
 ///! Read from stdin, process requests, and send responses to event loop.
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 use anyhow::Result;
 use log::{error, info};
 use nativeext::{ErrorKind, Request, Response};
 use serde_json::to_string;
+use tokio::io::{AsyncReadExt as _, Stdin};
 use tokio::sync::mpsc::Sender;
 use tokio::task;
 
@@ -18,12 +19,12 @@ const MAX_RESPONSE_LEN: u32 = 4_000_000_000;
 /// Continuously read [`Request`]s from stdin, spawning a worker for each request.
 ///
 /// Loop breaks when stdin reaches EOF.
-pub async fn run_handler(tx: Sender<Response>, mut stdin: io::Stdin) {
+pub async fn run_handler(tx: Sender<Response>, mut stdin: Stdin) {
     info!("Starting request handler");
     // Cannot lock stdin here, as it would be locked across `.await` point.
     // Lock stdin in each (synchronous) `recv_request` call
     loop {
-        let request = match read_request(&mut stdin) {
+        let request = match read_request(&mut stdin).await {
             Ok(Some(request)) => request,
             Ok(None) => {
                 info!("End of input");
@@ -88,11 +89,11 @@ pub async fn write_response(
 /// native-endian `u32` for payload length.
 ///
 /// Returns `Ok(None)` if stdin reached EOF.
-fn read_request(stdin: &mut io::Stdin) -> Result<Option<Request>, ErrorKind> {
+async fn read_request(stdin: &mut Stdin) -> Result<Option<Request>, ErrorKind> {
     // Lock once, for the duration of this function, rather than at each 'read' call
-    let mut stdin = stdin.lock();
+    // let mut stdin = stdin.lock();
 
-    let Some(length) = try_read_ne_u32(&mut stdin).map_err(|_| ErrorKind::Stdin)? else {
+    let Some(length) = try_read_ne_u32(stdin).await.map_err(|_| ErrorKind::Stdin)? else {
         return Ok(None);
     };
 
@@ -104,7 +105,7 @@ fn read_request(stdin: &mut io::Stdin) -> Result<Option<Request>, ErrorKind> {
     }
 
     let mut buffer = vec![0; length as usize];
-    if stdin.read_exact(&mut buffer).is_err() {
+    if stdin.read_exact(&mut buffer).await.is_err() {
         return Err(ErrorKind::Stdin);
     }
 
@@ -149,12 +150,9 @@ where
 /// Read a `u32` value from a reader, with native endianess.
 ///
 /// Returns `Ok(None)` if stdin reached EOF.
-fn try_read_ne_u32<R>(reader: &mut R) -> io::Result<Option<u32>>
-where
-    R: Read,
-{
+async fn try_read_ne_u32(reader: &mut Stdin) -> io::Result<Option<u32>> {
     let mut buf = [0u8; 4];
-    if let Err(error) = reader.read_exact(&mut buf) {
+    if let Err(error) = reader.read_exact(&mut buf).await {
         match error.kind() {
             io::ErrorKind::UnexpectedEof => return Ok(None),
             _ => return Err(error),
