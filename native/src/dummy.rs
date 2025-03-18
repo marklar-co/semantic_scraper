@@ -1,9 +1,16 @@
+///! Placeholder functions and values to demonstrate the native extension functionality.
 use std::time::{Duration, Instant};
 
 use tokio::time;
 
-pub const CONFIG_SERVER_ENDPOINT: &str = "tcp://127.0.0.1:5556";
+pub const CONFIG_SERVER_ADDRESS: &str = "tcp://127.0.0.1:5556";
 
+#[cfg(target_family = "unix")]
+pub const LOG_FILEPATH: &str = r"/tmp/nativeext.log";
+#[cfg(target_family = "windows")]
+pub const LOG_FILEPATH: &str = r"C:\Windows\Temp\nativeext.log";
+
+/// Sleep for a random-enough amount of time.
 pub async fn random_sleep() {
     let number = Instant::now().elapsed().as_nanos() % 256;
     let number = number as u64 * 3 + 200;
@@ -11,6 +18,9 @@ pub async fn random_sleep() {
     time::sleep(duration).await;
 }
 
+/// Return a list containing the first 2 words of each sentence.
+///
+/// Includes the domain name of the url at the beginning of the list.
 pub fn get_text_topics(url: String, text: String) -> Vec<String> {
     let domain = url
         .splitn(2, "://")
@@ -43,6 +53,5 @@ pub fn get_text_topics(url: String, text: String) -> Vec<String> {
         topics.push(topic);
     }
 
-    topics.push("END".to_string());
     topics
 }

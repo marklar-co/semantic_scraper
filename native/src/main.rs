@@ -1,29 +1,25 @@
 mod config;
 mod dummy;
-mod log_file;
+mod logger;
 mod request;
 
-use std::io;
+use std::{error, io};
 
 use anyhow::Result;
-use log::{error, info, LevelFilter};
-use simplelog::{Config, WriteLogger};
-
+use log::{error, info};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task;
 
-use crate::config::run_config_handler;
-use crate::log_file::LogFile;
-use crate::request::{run_request_loop, send_response};
-use nativeext::{ErrorKind, Response};
+use crate::request::write_response;
+use nativeext::Response;
 
 const CHANNEL_CAPACITY: usize = 32;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn error::Error>> {
     info!("Start nativeext");
 
-    WriteLogger::init(LevelFilter::Info, Config::default(), LogFile::new())?;
+    logger::register()?;
 
     // Create all resources here, even if not shared
 
@@ -43,10 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx_config, rx_config) = mpsc::channel::<Response>(CHANNEL_CAPACITY);
 
     task::spawn(async move {
-        run_config_handler(tx_config).await;
+        config::run_handler(tx_config).await;
     });
     task::spawn(async move {
-        run_request_loop(tx_primary, stdin).await;
+        request::run_handler(tx_primary, stdin).await;
     });
     run_event_loop(rx_primary, rx_config, stdout).await;
 
@@ -54,27 +50,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Continuously receive messages from two channels, and write responses to stdout.
+///
+/// Loop breaks when `rx_primary` has closed (stdin has reached EOF).
 async fn run_event_loop(
     mut rx_primary: Receiver<Response>,
     mut rx_config: Receiver<Response>,
     mut stdout_lock: io::StdoutLock<'_>,
 ) {
     info!("entering loop...");
-    while let Some(response) = next_message(&mut rx_primary, &mut rx_config).await {
-        if let Err(error) = send_response(&mut stdout_lock, response).await {
-            error!("failed to send response to client {:?}", error);
-            // Problem could be with payload, so try once to send error message to client
-            if let Err(error) =
-                send_response(&mut stdout_lock, ErrorKind::ClientResponseSend.into()).await
-            {
-                error!("failed to send error to client {:?}", error);
-            }
-        }
+    while let Some(response) = receive_next_message(&mut rx_primary, &mut rx_config).await {
+        write_response_or_error(&mut stdout_lock, response).await;
     }
     info!("EXITING LOOP!");
 }
 
-async fn next_message(
+/// Try to write a [`Response`] to stdout.
+///
+/// If anything fails, try to write [`Response::Error`] to stdout instead.
+///
+/// If the second write fails, give up.
+async fn write_response_or_error(stdout_lock: &mut io::StdoutLock<'_>, response: Response) {
+    let Err(error) = write_response(stdout_lock, response).await else {
+        return;
+    };
+    error!("failed to send response to client {:?}", error);
+
+    // Problem could be with payload, so try once to send error message to client
+    let Err(error) = write_response(stdout_lock, error.into()).await else {
+        return;
+    };
+    error!("failed to send error to client {:?}", error);
+}
+
+/// Read the next message from two channels, prioritizing `rx_primary`.
+///
+/// Returns `None` iff `rx_primary` has closed. In this case, all messages from `rx_config` will be ignored.
+async fn receive_next_message(
     rx_primary: &mut Receiver<Response>,
     rx_config: &mut Receiver<Response>,
 ) -> Option<Response> {
@@ -87,6 +99,7 @@ async fn next_message(
     }
 }
 
+/// Send a [`Response`] to a channel, reporting any errors.
 async fn send_response_message(tx: &Sender<Response>, response: Response) {
     if let Err(error) = tx.send(response).await {
         // Error can only occur due to receiver closing, so don't try to send error message through

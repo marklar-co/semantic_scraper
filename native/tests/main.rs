@@ -85,14 +85,12 @@ fn get_topics() {
                     "UT enim".to_string(),
                     "DUIS aute".to_string(),
                     "EXCEPTEUR sint".to_string(),
-                    "END".to_string(),
                 ],
             },
             Response::ReturnTextTopics {
                 req_id: 2,
                 topics: vec![
                     "FROM emptytext.com".to_string(),
-                    "END".to_string(),
                 ],
             },
             Response::ReturnTextTopics {
@@ -100,7 +98,6 @@ fn get_topics() {
                 topics: vec![
                     "FROM longtext.com".to_string(),
                     "LOREM ipsum".to_string(),
-                    "END".to_string(),
                 ],
             },
             Response::ReturnTextTopics {
@@ -109,7 +106,6 @@ fn get_topics() {
                     "FROM vitae.com".to_string(),
                     "VITAE interdum,".to_string(),
                     "CURABITUR posuere".to_string(),
-                    "END".to_string(),
                 ],
             },
             Response::ReturnTextTopics {
@@ -119,14 +115,12 @@ fn get_topics() {
                     "这是".to_string(),
                     "一个中文测".to_string(),
                     "试文本".to_string(),
-                    "END".to_string(),
                 ],
             },
             Response::ReturnTextTopics {
                 req_id: 12,
                 topics: vec![
                     "FROM whitespace.com".to_string(),
-                    "END".to_string(),
                 ],
             },
         ],
