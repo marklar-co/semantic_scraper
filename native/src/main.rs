@@ -23,11 +23,11 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
 
     // Create all resources here, even if not shared
 
-    // Cannot lock stdin here, as it would be locked across `.await` point.
+    // Use non-blocking stdin.
     // Stdin must only be read from inside request reader loop
     let stdin = tokio::io::stdin();
     // Lock stdout only once, since it must only be written to inside main event loop.
-    let stdout = io::stdout().lock();
+    let stdout_lock = io::stdout().lock();
 
     // Channel for sending responses from response handler to event loop.
     // Closing of this channel indicates all client requests have been completed and stdin has
@@ -44,7 +44,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     task::spawn(async move {
         request::run_handler(tx_primary, stdin).await;
     });
-    run_event_loop(rx_primary, rx_config, stdout).await;
+    run_event_loop(rx_primary, rx_config, stdout_lock).await;
 
     info!("Closing nativeext");
     Ok(())
