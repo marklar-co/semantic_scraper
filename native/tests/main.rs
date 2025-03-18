@@ -95,6 +95,11 @@ fn get_topics() {
                 text: " vitae  interdum, posuere ullamcorper ac ac sit amet justo. curabitur Posuere  et ".to_string(),
             },
             Request::GetTextTopics {
+                req_id: 55,
+                url: "".to_string(),
+                text: "Lorem ipsum".to_string(),
+            },
+            Request::GetTextTopics {
                 req_id: 5,
                 url: "https://foreign.lang.com".to_string(),
                 text: "这是.一个中文测.试文本".to_string(),
@@ -136,6 +141,10 @@ fn get_topics() {
                     "VITAE interdum,".to_string(),
                     "CURABITUR posuere".to_string(),
                 ],
+            },
+            Response::Error {
+                req_id: Some(55),
+                error: ErrorKind::ClientProcess,
             },
             Response::ReturnTextTopics {
                 req_id: 5,
