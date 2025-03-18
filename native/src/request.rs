@@ -131,8 +131,10 @@ async fn process_request(request: Request) -> Result<Response, Response> {
 
         Request::GetTextTopics { req_id, url, text } => {
             info!("GetTextTopics received from browser");
-            // TODO(feat): Return error if eg. url is empty
-            let topics = dummy::get_text_topics(url, text);
+            let topics = dummy::get_text_topics(url, text).map_err(|error| Response::Error {
+                req_id: Some(req_id),
+                error,
+            })?;
             Ok(Response::ReturnTextTopics { req_id, topics })
         }
     }
