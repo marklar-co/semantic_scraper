@@ -1,4 +1,4 @@
-///! Placeholder functions and values to demonstrate the native extension functionality.
+//! Placeholder functions and values to demonstrate the native extension functionality.
 use std::time::{Duration, Instant};
 
 use nativeext::ErrorKind;
@@ -28,10 +28,10 @@ pub fn get_text_topics(url: String, text: String) -> Result<Vec<String>, ErrorKi
     }
 
     let domain = url
-        .splitn(2, "://")
-        .nth(1)
+        .split_once("://")
+        .map(|x| x.1)
         .unwrap_or(&url)
-        .splitn(2, '/')
+        .split('/')
         .next()
         .unwrap_or(&url);
 
