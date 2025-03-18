@@ -123,7 +123,7 @@ async fn process_request(request: Request) -> Result<Response, Response> {
 
         Request::GetTextTopics { req_id, url, text } => {
             info!("Received request: GetTextTopics");
-            let topics = dummy::get_text_topics(url, text).map_err(|error| Response::Error {
+            let topics = dummy::get_text_topics(&url, &text).map_err(|error| Response::Error {
                 req_id: Some(req_id),
                 error,
             })?;
