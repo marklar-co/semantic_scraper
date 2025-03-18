@@ -17,7 +17,7 @@ const CHANNEL_CAPACITY: usize = 32;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn error::Error>> {
-    info!("Start nativeext");
+    info!("Started nativeext");
 
     logger::register()?;
 
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn error::Error>> {
     });
     run_event_loop(rx_primary, rx_config, stdout).await;
 
-    info!("CLOSING MAIN THREAD");
+    info!("Closing nativeext");
     Ok(())
 }
 
@@ -58,11 +58,11 @@ async fn run_event_loop(
     mut rx_config: Receiver<Response>,
     mut stdout_lock: io::StdoutLock<'_>,
 ) {
-    info!("entering loop...");
+    info!("Entering event loop");
     while let Some(response) = receive_next_message(&mut rx_primary, &mut rx_config).await {
         write_response_or_error(&mut stdout_lock, response).await;
     }
-    info!("EXITING LOOP!");
+    info!("Exiting event loop");
 }
 
 /// Try to write a [`Response`] to stdout.
@@ -74,13 +74,13 @@ async fn write_response_or_error(stdout_lock: &mut io::StdoutLock<'_>, response:
     let Err(error) = write_response(stdout_lock, response).await else {
         return;
     };
-    error!("failed to send response to client {:?}", error);
+    error!("Failed to send response to client: {:?}", error);
 
     // Problem could be with payload, so try once to send error message to client
     let Err(error) = write_response(stdout_lock, error.into()).await else {
         return;
     };
-    error!("failed to send error to client {:?}", error);
+    error!("Failed to send error to client: {:?}", error);
 }
 
 /// Read the next message from two channels, prioritizing `rx_primary`.
@@ -104,9 +104,6 @@ async fn send_response_message(tx: &Sender<Response>, response: Response) {
     if let Err(error) = tx.send(response).await {
         // Error can only occur due to receiver closing, so don't try to send error message through
         // same channel
-        error!(
-            "failed to send response message to main event loop {}",
-            error,
-        );
+        error!("Failed to send message to event loop: {}", error);
     }
 }

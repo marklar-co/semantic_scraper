@@ -6,3 +6,7 @@ document.getElementById("getTopicsButton").addEventListener("click", function() 
     chrome.runtime.sendMessage({ action: "getTopics" }, _response => { });
 });
 
+document.getElementById("getTopicsErrorButton").addEventListener("click", function() {
+    chrome.runtime.sendMessage({ action: "getTopicsError" }, _response => { });
+});
+

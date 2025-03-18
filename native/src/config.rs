@@ -15,6 +15,7 @@ use nativeext::{ErrorKind, Response};
 ///
 /// Function should not return, while connection is maintained.
 pub async fn run_handler(tx: Sender<Response>) {
+    info!("Starting config handler");
     let mut socket = match connect_socket().await {
         Ok(socket) => socket,
         Err(error) => {
@@ -29,13 +30,12 @@ pub async fn run_handler(tx: Sender<Response>) {
         let (key, value) = match receive_message(&mut socket).await {
             Ok(message) => message,
             Err(error) => {
-                error!("failed to receive message: {:?}", error);
+                error!("Failed to receive config message: {:?}", error);
                 send_response_message(&tx, error.into()).await;
                 continue;
             }
         };
-
-        info!("Update config: `{}={}`", key, value);
+        info!("Received config update: `{}={}`", key, value);
 
         let response = Response::UpdateConfig { key, value };
         send_response_message(&tx, response).await;
@@ -48,13 +48,16 @@ async fn connect_socket() -> Result<SubSocket, ErrorKind> {
 
     // `connect` will wait for server to open.
     // It should only return an error for malformed endpoint
-    if socket.connect(dummy::CONFIG_SERVER_ADDRESS).await.is_err() {
-        error!("failed to connect to config server (malformed endpoint)");
+    if let Err(error) = socket.connect(dummy::CONFIG_SERVER_ADDRESS).await {
+        error!(
+            "Failed to connect to config server (likely malformed endpoint): {:?}",
+            error,
+        );
         return Err(ErrorKind::ConfigConnect);
     }
 
-    if socket.subscribe("").await.is_err() {
-        error!("failed to subscribe to config server");
+    if let Err(error) = socket.subscribe("").await {
+        error!("Failed to subscribe to config server: {:?}", error);
         return Err(ErrorKind::ConfigSubscribe);
     }
 
@@ -77,16 +80,13 @@ async fn receive_message(socket: &mut SubSocket) -> Result<(String, String), Err
 /// Returns `Err` if the message does not contain exactly one frame, or is not valid UTF-8.
 fn message_to_string(message: ZmqMessage) -> Result<String, ErrorKind> {
     if message.len() > 1 {
-        error!("message to big");
         return Err(ErrorKind::ConfigMessageSize);
     }
     let Some(frame) = message.get(0) else {
-        error!("empty message");
         return Err(ErrorKind::ConfigMessageSize);
     };
     let bytes = frame.to_vec();
     let Ok(string) = String::from_utf8(bytes) else {
-        error!("message is not utf8");
         return Err(ErrorKind::ConfigMessageDeserialize);
     };
     Ok(string)

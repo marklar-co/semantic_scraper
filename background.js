@@ -8,6 +8,8 @@ chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
         runPingTest();
     } else if (message.action === "getTopics") {
         runGetTextTopicsTest();
+    } else if (message.action === "getTopicsError") {
+        runGetTextTopicsErrorTest();
     } else {
         console.error("Unknown local message:", message);
     }
@@ -60,6 +62,13 @@ function onDisconnected() {
     port = null;
 }
 
+function runPingTest() {
+    postMessageNative({
+        type: "Ping",
+        req_id: req_id++
+    });
+}
+
 function runGetTextTopicsTest() {
     const requests = [
         {
@@ -98,10 +107,12 @@ function runGetTextTopicsTest() {
     }
 }
 
-function runPingTest() {
+function runGetTextTopicsErrorTest() {
     postMessageNative({
-        type: "Ping",
-        req_id: req_id++
+        type: "GetTextTopics",
+        req_id: req_id++,
+        url: "",
+        text: "Lorem ipsum",
     });
 }
 
@@ -110,5 +121,6 @@ function postMessageNative(message) {
         console.error("Native app is not connected");
         return;
     }
+    console.log("SENDING", message);
     port.postMessage(message);
 }
