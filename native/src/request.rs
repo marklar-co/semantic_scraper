@@ -1,10 +1,10 @@
+///! Read from stdin, process requests, and send responses to event loop.
 use std::io::{self, Read, Write};
 
 use anyhow::Result;
 use log::{error, info};
 use nativeext::{ErrorKind, Request, Response};
 use serde_json::to_string;
-
 use tokio::sync::mpsc::Sender;
 use tokio::task;
 
@@ -15,11 +15,14 @@ const MAX_REQUEST_LEN: u32 = 8 * 1024;
 /// Technical maximum is 4GB as per [Chrome documentation](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).
 const MAX_RESPONSE_LEN: u32 = 4_000_000_000;
 
-pub async fn run_request_loop(tx: Sender<Response>, mut stdin: io::Stdin) {
+/// Continuously read [`Request`]s from stdin, spawning a worker for each request.
+///
+/// Loop breaks when stdin reaches EOF.
+pub async fn run_handler(tx: Sender<Response>, mut stdin: io::Stdin) {
     // Cannot lock stdin here, as it would be locked across `.await` point.
     // Lock stdin in each (synchronous) `recv_request` call
     loop {
-        let request = match recv_request(&mut stdin) {
+        let request = match read_request(&mut stdin) {
             Ok(Some(request)) => request,
             Ok(None) => {
                 info!("End of input");
@@ -35,24 +38,18 @@ pub async fn run_request_loop(tx: Sender<Response>, mut stdin: io::Stdin) {
 
         let tx = tx.clone();
         task::spawn(async move {
-            run_request_handler(tx, request).await;
+            process_and_send_response(tx, request).await;
         });
     }
 }
 
-async fn run_request_handler(tx: Sender<Response>, request: Request) {
-    let response = match process_message(request).await {
+/// Process a [`Request`] and send [`Response`] to `tx`.
+async fn process_and_send_response(tx: Sender<Response>, request: Request) {
+    let response = match process_request(request).await {
         Ok(response) => response,
-        Err(req_id) => {
+        Err(error) => {
             error!("Failed to process message");
-            send_response_message(
-                &tx,
-                Response::Error {
-                    req_id: Some(req_id),
-                    error: ErrorKind::ClientProcess,
-                },
-            )
-            .await;
+            send_response_message(&tx, error).await;
             return;
         }
     };
@@ -61,35 +58,11 @@ async fn run_request_handler(tx: Sender<Response>, request: Request) {
     send_response_message(&tx, response).await;
 }
 
-/// Returns `Ok(None)` if stdin reached EOF.
-fn recv_request(stdin: &mut io::Stdin) -> Result<Option<Request>, ErrorKind> {
-    // Lock once, for the duration of this function, rather than at each 'read' call
-    let mut stdin = stdin.lock();
-
-    let Some(length) = try_read_ne_u32(&mut stdin).map_err(|_| ErrorKind::Stdin)? else {
-        return Ok(None);
-    };
-
-    if length > MAX_REQUEST_LEN {
-        error!("Message length {length} exceeds max {MAX_REQUEST_LEN}");
-        return Err(ErrorKind::ClientRequestSize);
-    }
-
-    let mut buffer = vec![0; length as usize];
-    if let Err(error) = stdin.read_exact(&mut buffer) {
-        error!("failed to read from stdin {:?}", error);
-        return Err(ErrorKind::Stdin);
-    }
-
-    let Ok(request) = serde_json::from_slice::<Request>(&buffer) else {
-        error!("failed to deserialize request");
-        return Err(ErrorKind::ClientRequestDeserialize);
-    };
-
-    Ok(Some(request))
-}
-
-pub async fn send_response(
+/// Write [`Response`] to stdout, encoding as UTF-8 JSON with a leading native-endian `u32` for
+/// payload length.
+///
+/// Must only be called by main event loop.
+pub async fn write_response(
     stdout_lock: &mut io::StdoutLock<'_>,
     response: Response,
 ) -> Result<(), ErrorKind> {
@@ -109,8 +82,45 @@ pub async fn send_response(
     Ok(())
 }
 
-// TODO(feat): Simulate error while processing
-async fn process_message(request: Request) -> Result<Response, u64> {
+/// Read a [`Request`] from stdin, provided that the data is encoded as UTF-8 JSON with a leading
+/// native-endian `u32` for payload length.
+///
+/// Returns `Ok(None)` if stdin reached EOF.
+fn read_request(stdin: &mut io::Stdin) -> Result<Option<Request>, ErrorKind> {
+    // Lock once, for the duration of this function, rather than at each 'read' call
+    let mut stdin = stdin.lock();
+
+    let Some(length) = try_read_ne_u32(&mut stdin).map_err(|_| ErrorKind::Stdin)? else {
+        return Ok(None);
+    };
+
+    if length < 1 {
+        error!("Received an empty request");
+        return Err(ErrorKind::ClientRequestSize);
+    }
+    if length > MAX_REQUEST_LEN {
+        error!("Message length {length} exceeds max {MAX_REQUEST_LEN}");
+        return Err(ErrorKind::ClientRequestSize);
+    }
+
+    let mut buffer = vec![0; length as usize];
+    if let Err(error) = stdin.read_exact(&mut buffer) {
+        error!("failed to read from stdin {:?}", error);
+        return Err(ErrorKind::Stdin);
+    }
+
+    let Ok(request) = serde_json::from_slice::<Request>(&buffer) else {
+        error!("failed to deserialize request");
+        return Err(ErrorKind::ClientRequestDeserialize);
+    };
+
+    Ok(Some(request))
+}
+
+/// Process a [`Request`] and transform it into a [`Response`].
+///
+/// Returns `Err(Response::Error { .. })`, for any error case, including invalid user input.
+async fn process_request(request: Request) -> Result<Response, Response> {
     dummy::random_sleep().await;
 
     match request {
@@ -121,20 +131,23 @@ async fn process_message(request: Request) -> Result<Response, u64> {
 
         Request::GetTextTopics { req_id, url, text } => {
             info!("GetTextTopics received from browser");
+            // TODO(feat): Return error if eg. url is empty
             let topics = dummy::get_text_topics(url, text);
             Ok(Response::ReturnTextTopics { req_id, topics })
         }
     }
 }
 
+/// Write a `u32` value to a writer, with native endianess.
 fn write_ne_u32<W>(writer: &mut W, value: u32) -> io::Result<()>
 where
     W: Write,
 {
-    let buf = value.to_ne_bytes();
-    writer.write_all(&buf)
+    writer.write_all(&value.to_ne_bytes())
 }
 
+/// Read a `u32` value from a reader, with native endianess.
+///
 /// Returns `Ok(None)` if stdin reached EOF.
 fn try_read_ne_u32<R>(reader: &mut R) -> io::Result<Option<u32>>
 where

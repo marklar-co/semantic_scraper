@@ -1,35 +1,32 @@
-use log::{error, info};
-use zeromq::{Socket as _, SocketRecv as _, SubSocket, ZmqMessage};
+///! Subscribe to local ZeroMQ config server and send updates to event loop.
+use std::convert::Infallible;
 
+use log::{error, info};
 use tokio::sync::mpsc::Sender;
+use zeromq::{Socket as _, SocketRecv as _, SubSocket, ZmqMessage};
 
 use crate::{dummy, send_response_message};
 use nativeext::{ErrorKind, Response};
 
-pub async fn run_config_handler(tx: Sender<Response>) {
-    let mut socket = zeromq::SubSocket::new();
-
-    // `connect` will wait for server to open.
-    // It should only return an error for malformed endpoint
-    if socket.connect(dummy::CONFIG_SERVER_ENDPOINT).await.is_err() {
-        error!("failed to connect to config server (malformed endpoint)");
-        send_response_message(&tx, ErrorKind::ConfigConnect.into()).await;
-        return;
-    }
-
-    if socket.subscribe("").await.is_err() {
-        error!("failed to subscribe to config server");
-        send_response_message(&tx, ErrorKind::ConfigSubscribe.into()).await;
-        return;
-    }
-
+/// Continuously read config messages from server, sending updates to `tx` as
+/// [`Response::UpdateConfig`].
+///
+/// Does not spawn subsequent tasks.
+///
+/// Function should not return, while connection is maintained.
+pub async fn run_handler(tx: Sender<Response>) {
+    let mut socket = match connect_socket().await {
+        Ok(socket) => socket,
+        Err(error) => {
+            send_response_message(&tx, error.into()).await;
+            return;
+        }
+    };
     info!("Subscribed to config server");
-    run_config_loop(tx, socket).await;
-}
 
-async fn run_config_loop(tx: Sender<Response>, mut socket: SubSocket) -> ! {
-    loop {
-        let (key, value) = match recv_message(&mut socket).await {
+    // Loop should never break
+    let _: Infallible = loop {
+        let (key, value) = match receive_message(&mut socket).await {
             Ok(message) => message,
             Err(error) => {
                 error!("failed to receive message: {:?}", error);
@@ -42,34 +39,64 @@ async fn run_config_loop(tx: Sender<Response>, mut socket: SubSocket) -> ! {
 
         let response = Response::UpdateConfig { key, value };
         send_response_message(&tx, response).await;
-    }
+    };
 }
 
-async fn recv_message(socket: &mut SubSocket) -> Result<(String, String), ErrorKind> {
+/// Connect to config server and subscribe to messages.
+async fn connect_socket() -> Result<SubSocket, ErrorKind> {
+    let mut socket = zeromq::SubSocket::new();
+
+    // `connect` will wait for server to open.
+    // It should only return an error for malformed endpoint
+    if socket.connect(dummy::CONFIG_SERVER_ADDRESS).await.is_err() {
+        error!("failed to connect to config server (malformed endpoint)");
+        return Err(ErrorKind::ConfigConnect);
+    }
+
+    if socket.subscribe("").await.is_err() {
+        error!("failed to subscribe to config server");
+        return Err(ErrorKind::ConfigSubscribe);
+    }
+
+    Ok(socket)
+}
+
+/// Await the next message from the subscriber socket.
+///
+/// Deserializes the message by splitting into a key/value pair at the first `=` character.
+async fn receive_message(socket: &mut SubSocket) -> Result<(String, String), ErrorKind> {
     let message = socket.recv().await.map_err(|_| ErrorKind::ConfigReceive)?;
     let string = message_to_string(message)?;
     // Value could easily be deserialized as a `serde_json::Value` if necessary
-    let (key, value) = split_key_value(&string).ok_or(ErrorKind::ConfigResponseDeserialize)?;
+    let (key, value) = split_key_value(&string).ok_or(ErrorKind::ConfigMessageDeserialize)?;
     Ok((key.to_string(), value.to_string()))
 }
 
+/// Convert a [`ZmqMessage`] into a [`String`].
+///
+/// Returns `Err` if the message does not contain exactly one frame, or is not valid UTF-8.
 fn message_to_string(message: ZmqMessage) -> Result<String, ErrorKind> {
     if message.len() > 1 {
         error!("message to big");
-        return Err(ErrorKind::ConfigResponseSize);
+        return Err(ErrorKind::ConfigMessageSize);
     }
     let Some(frame) = message.get(0) else {
         error!("empty message");
-        return Err(ErrorKind::ConfigResponseSize);
+        return Err(ErrorKind::ConfigMessageSize);
     };
     let bytes = frame.to_vec();
     let Ok(string) = String::from_utf8(bytes) else {
         error!("message is not utf8");
-        return Err(ErrorKind::ConfigResponseDecode);
+        return Err(ErrorKind::ConfigMessageDeserialize);
     };
     Ok(string)
 }
 
+/// Split a string into a key/value pair at the first `=` character.
+///
+/// Does not trim whitespace.
+///
+/// Returns `None` if either key or value is empty, or no `=` character was found.
 fn split_key_value(string: &str) -> Option<(&str, &str)> {
     let index = string.find('=')?;
     let (key, value) = string.split_at(index);
@@ -78,7 +105,6 @@ fn split_key_value(string: &str) -> Option<(&str, &str)> {
     value.next();
     let value = value.as_str();
 
-    let (key, value) = (key.trim(), value.trim());
     if key.is_empty() || value.is_empty() {
         return None;
     }
@@ -95,7 +121,7 @@ mod tests {
         assert_eq!(split_key_value("abc=def"), Some(("abc", "def")));
         assert_eq!(
             split_key_value("  abc  = def  ghi  \n "),
-            Some(("abc", "def  ghi"))
+            Some(("  abc  ", " def  ghi  \n "))
         );
         assert_eq!(split_key_value("abc==def"), Some(("abc", "=def")));
         assert_eq!(split_key_value(""), None);
