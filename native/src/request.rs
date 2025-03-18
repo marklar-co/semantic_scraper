@@ -21,8 +21,6 @@ const MAX_RESPONSE_LEN: u32 = 4_000_000_000;
 /// Loop breaks when stdin reaches EOF.
 pub async fn run_handler(tx: Sender<Response>, mut stdin: Stdin) {
     info!("Starting request handler");
-    // Cannot lock stdin here, as it would be locked across `.await` point.
-    // Lock stdin in each (synchronous) `recv_request` call
     loop {
         let request = match read_request(&mut stdin).await {
             Ok(Some(request)) => request,
@@ -75,8 +73,6 @@ pub async fn write_response(
         return Err(ErrorKind::ClientResponseSize);
     }
 
-    // FIX!!! Not flushing?
-
     write_ne_u32(stdout_lock, response_length).map_err(|_| ErrorKind::Stdout)?;
     stdout_lock
         .write_all(response_string.as_bytes())
@@ -90,9 +86,6 @@ pub async fn write_response(
 ///
 /// Returns `Ok(None)` if stdin reached EOF.
 async fn read_request(stdin: &mut Stdin) -> Result<Option<Request>, ErrorKind> {
-    // Lock once, for the duration of this function, rather than at each 'read' call
-    // let mut stdin = stdin.lock();
-
     let Some(length) = try_read_ne_u32(stdin).await.map_err(|_| ErrorKind::Stdin)? else {
         return Ok(None);
     };

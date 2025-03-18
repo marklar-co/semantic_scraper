@@ -14,7 +14,7 @@ pub const LOG_FILEPATH: &str = r"C:\Windows\Temp\nativeext.log";
 /// Sleep for a random-enough amount of time.
 pub async fn random_sleep() {
     let number = Instant::now().elapsed().as_nanos() % 256;
-    let number = number as u64 * 3 + 200;
+    let number = number as u64 * 5 + 500;
     let duration = Duration::from_millis(number);
     time::sleep(duration).await;
 }
