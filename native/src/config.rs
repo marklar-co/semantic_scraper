@@ -1,4 +1,4 @@
-///! Subscribe to local ZeroMQ config server and send updates to event loop.
+//! Subscribe to local ZeroMQ config server and send updates to event loop.
 use std::convert::Infallible;
 
 use log::{error, info};

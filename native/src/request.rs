@@ -1,4 +1,4 @@
-///! Read from stdin, process requests, and send responses to event loop.
+//! Read from stdin, process requests, and send responses to event loop.
 use std::io::{self, Write};
 
 use anyhow::Result;
