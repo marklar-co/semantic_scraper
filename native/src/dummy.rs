@@ -19,21 +19,23 @@ pub async fn random_sleep() {
     time::sleep(duration).await;
 }
 
-/// Return a list containing the first 2 words of each sentence.
+/// Return a list containing the first 2 words of each sentence, the first word being uppercase and
+/// the second lowercase.
 ///
-/// Includes the domain name of the url at the beginning of the list.
+/// Includes the domain name of the url (prefixed with `'FROM '`) at the beginning of the list.
 pub fn get_text_topics(url: &str, text: &str) -> Result<Vec<String>, ErrorKind> {
     if url.is_empty() {
         return Err(ErrorKind::ClientProcess);
     }
 
+    // https://something.example.com/some/path -> something.example.com
     let domain = url
         .split_once("://")
         .map(|x| x.1)
-        .unwrap_or(&url)
+        .unwrap_or(url)
         .split('/')
         .next()
-        .unwrap_or(&url);
+        .unwrap_or(url);
 
     let mut topics = Vec::new();
     topics.push(format!("FROM {}", domain));
