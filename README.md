@@ -16,6 +16,13 @@ Clone this repo, then:
 
 ### Set up the native extension
 
+1) Build the native extension binary using `cargo`, or [download the latest release](https://github.com/dxrcy/nativeext/releases/latest)
+2) Open `nativeext.json`
+3) Change the `"path"` value to the **absolute** path of the native extension binary
+4) Change the `"allowed-origins"` value to the extension ID\* (including trailing slash)
+
+\*Extension ID can be found on the `chrome://extensions` listing.
+
 #### Windows
 
 1) Open `regedit`
