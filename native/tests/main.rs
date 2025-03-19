@@ -12,7 +12,7 @@ fn ping_many() {
 
 #[test]
 fn get_topics_many() {
-    utils::parallelize(20, get_topics);
+    utils::parallelize(100, get_topics);
 }
 
 #[test]
