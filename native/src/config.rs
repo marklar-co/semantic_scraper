@@ -2,10 +2,10 @@
 use std::convert::Infallible;
 
 use log::{error, info};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::WeakSender;
 use zeromq::{Socket as _, SocketRecv as _, SubSocket, ZmqMessage};
 
-use crate::{dummy, send_response_message};
+use crate::{dummy, send_response_weak};
 use nativeext::{ErrorKind, Response};
 
 /// Continuously read config messages from server, sending updates to `tx` as
@@ -14,12 +14,12 @@ use nativeext::{ErrorKind, Response};
 /// Does not spawn subsequent tasks.
 ///
 /// Function should not return, while connection is maintained.
-pub async fn run_handler(tx: Sender<Response>) {
+pub async fn run_handler(tx: WeakSender<Response>) {
     info!("Starting config handler");
     let mut socket = match connect_socket().await {
         Ok(socket) => socket,
         Err(error) => {
-            send_response_message(&tx, error.into()).await;
+            send_response_weak(&tx, error.into()).await;
             return;
         }
     };
@@ -31,14 +31,14 @@ pub async fn run_handler(tx: Sender<Response>) {
             Ok(message) => message,
             Err(error) => {
                 error!("Failed to receive config message: {:?}", error);
-                send_response_message(&tx, error.into()).await;
+                send_response_weak(&tx, error.into()).await;
                 continue;
             }
         };
         info!("Received config update: `{}={}`", key, value);
 
         let response = Response::UpdateConfig { key, value };
-        send_response_message(&tx, response).await;
+        send_response_weak(&tx, response).await;
     };
 }
 

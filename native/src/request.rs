@@ -9,7 +9,7 @@ use tokio::io::{AsyncReadExt, Stdin};
 use tokio::sync::mpsc::Sender;
 use tokio::task;
 
-use crate::{dummy, send_response_message};
+use crate::{dummy, send_response};
 
 /// Technical maximum is 1MB as per [Chrome documentation](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).
 const MAX_REQUEST_LEN: u32 = 8 * 1024;
@@ -30,7 +30,7 @@ pub async fn run_handler(tx: Sender<Response>, mut stdin: Stdin) {
             }
             Err(error) => {
                 error!("Failed to recieve request: {:?}", error);
-                send_response_message(&tx, error.into()).await;
+                send_response(&tx, error.into()).await;
                 continue;
             }
         };
@@ -48,13 +48,13 @@ async fn process_and_send_response(tx: Sender<Response>, request: Request) {
         Ok(response) => response,
         Err(error) => {
             error!("Failed to process request: {:?}", error);
-            send_response_message(&tx, error).await;
+            send_response(&tx, error).await;
             return;
         }
     };
 
     info!("Sending response: {:?}", response);
-    send_response_message(&tx, response).await;
+    send_response(&tx, response).await;
 }
 
 /// Write [`Response`] to stdout, encoding as UTF-8 JSON with a leading native-endian `u32` for
