@@ -1,103 +1,99 @@
+mod config;
+mod dummy;
+mod logger;
+mod request;
+
+use std::{error, io};
+
 use anyhow::Result;
-use log::{info, LevelFilter};
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use serde::{Deserialize, Serialize};
-use serde_json::to_string;
-use simplelog::{WriteLogger, Config};
-use std::fs::File;
-use std::io::{self, Read, Write};
+use log::{error, info, warn};
+use tokio::sync::mpsc::{self, Receiver, Sender, WeakSender};
+use tokio::task;
 
-const MSG_LEN_MAX: u32 = 8 * 1024;
+use crate::request::write_response;
+use nativeext::Response;
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[derive(Debug)]
-enum FromBrowser {
-    Ping { req_id: u64 },
-    GetTextTopics { req_id: u64, url: String, text: String },
+const CHANNEL_CAPACITY: usize = 32;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn error::Error>> {
+    info!("Started nativeext");
+
+    logger::register()?;
+
+    // Create all resources here, even if not shared
+
+    // Use non-blocking stdin.
+    // Stdin must only be read from inside request reader loop
+    let stdin = tokio::io::stdin();
+    // Lock stdout only once, since it must only be written to inside main event loop
+    let stdout_lock = io::stdout().lock();
+
+    // Channel for sending responses from both the client request handler and the config listener.
+    // Closing of this channel indicates all client requests have been completed and stdin has
+    // reached EOF. When this happens, event loop should break
+    let (tx, rx) = mpsc::channel::<Response>(CHANNEL_CAPACITY);
+    // Use a weak sender for config update messages.
+    // This way the channel can close even while the config listener is active and holding a sender
+    let tx_weak = tx.downgrade();
+
+    task::spawn(async move {
+        config::run_handler(tx_weak).await;
+    });
+    task::spawn(async move {
+        request::run_handler(tx, stdin).await;
+    });
+    run_event_loop(rx, stdout_lock).await;
+
+    info!("Closing nativeext");
+    Ok(())
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[derive(Debug)]
-enum ToBrowser {
-    Pong { req_id: u64 },
-    ReturnTextTopics { req_id: u64, topics: Vec<String> },
-    UpdateConf { key: String, val: String }
-}
-
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    WriteLogger::init(
-        LevelFilter::Info,
-        Config::default(),
-        File::create(r"C:\dev\semantic_scraper\native\hello.log")?
-    )?;
-
-    info!("nativeex started");
-
-    let stdin = io::stdin();
-    let mut stdin_lock = stdin.lock();
-
-    let stdout = io::stdout();
-    let mut stdout_lock = stdout.lock();
-
-    loop {
-        let Ok(length) = stdin_lock.read_u32::<NativeEndian>() else {
-            info!("failed to read message length (probably browser exit)");
-            break;
-        };
-
-        if length > MSG_LEN_MAX {
-            info!("Message length {length} exceeds max {MSG_LEN_MAX}");
-            continue;
-        }
-
-        let mut buffer = vec![0; length as usize];
-        stdin_lock.read_exact(&mut buffer)?;
-        let request: Result<FromBrowser, _> = serde_json::from_slice(&buffer);
-
-        if let Ok(message) = request {
-            if let Err(e) = process_message(&mut stdout_lock, message) {
-                info!("Failed to process message: {e}");
-            }
-        } else {
-            match std::str::from_utf8(&buffer) {
-                Ok(buffer_str) => info!("failed to parse FromBrowser: {}", buffer_str),
-                Err(_) => info!("failed to parse FromBrowser: {:?}", buffer),
-            }
-            continue;
-        }
+/// Continuously receive [`Response`]s from a [`Receiver`], writing each to stdout.
+///
+/// Loop breaks when `rx` has closed (stdin has reached EOF).
+async fn run_event_loop(mut rx: Receiver<Response>, mut stdout_lock: io::StdoutLock<'_>) {
+    info!("Entering event loop");
+    while let Some(response) = rx.recv().await {
+        write_response_or_error(&mut stdout_lock, response).await;
     }
-
-    Ok(())
+    info!("Exiting event loop");
 }
 
+/// Try to write a [`Response`] to stdout.
+///
+/// If anything fails, try to write [`Response::Error`] to stdout instead.
+///
+/// If the second write fails, give up.
+async fn write_response_or_error(stdout_lock: &mut io::StdoutLock<'_>, response: Response) {
+    let Err(error) = write_response(stdout_lock, response).await else {
+        return;
+    };
+    error!("Failed to send response to client: {:?}", error);
 
-fn process_message(
-    stdout_lock: &mut std::io::StdoutLock,
-    request: FromBrowser,
-) -> Result<()> {
-    match request {
-        FromBrowser::Ping { req_id } => {
-            info!("ping received from browser");
-            send_response(stdout_lock, &ToBrowser::Pong { req_id })?;
-        },
-        FromBrowser::GetTextTopics { req_id, url: _, text: _ } => {
-            let topics: Vec<String> = vec!["topic1".to_string(), "topic2".to_string()];
-            send_response(stdout_lock, &ToBrowser::ReturnTextTopics { req_id, topics })?;
-        },
+    // Problem could be with payload, so try once to send error message to client
+    let Err(error) = write_response(stdout_lock, error.into()).await else {
+        return;
+    };
+    error!("Failed to send error to client: {:?}", error);
+}
+
+/// Send a [`Response`] through a [`Sender`], reporting any errors.
+async fn send_response(tx: &Sender<Response>, response: Response) {
+    if let Err(error) = tx.send(response).await {
+        // Error can only occur due to receiver closing, so don't try to send error message through
+        // same channel
+        error!("Failed to send message to event loop: {}", error);
     }
-
-    Ok(())
 }
 
-fn send_response(stdout_lock: &mut std::io::StdoutLock, response: &ToBrowser) -> Result<()> {
-    let response_string = to_string(response)?;
-    let response_length = u32::try_from(response_string.len())?;
-
-    stdout_lock.write_u32::<NativeEndian>(response_length)?;
-    stdout_lock.write_all(response_string.as_bytes())?;
-    stdout_lock.flush()?;
-    Ok(())
+/// Send a [`Response`] through a [`WeakSender`], reporting any errors.
+///
+/// If the weak sender cannot be upgraded to a [`Sender`], then a warning will be logged.
+async fn send_response_weak(tx: &WeakSender<Response>, response: Response) {
+    let Some(tx) = tx.upgrade() else {
+        warn!("Channel has been closed, cannot send config update");
+        return;
+    };
+    send_response(&tx, response).await;
 }
