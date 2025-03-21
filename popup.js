@@ -37,6 +37,18 @@ document.getElementById('downloadButton').addEventListener('click', function () 
     });
 });
 
+document.getElementById('pingButton').addEventListener('click', function () {
+    chrome.runtime.sendMessage({ action: 'ping' }, _response => { });
+});
+
+document.getElementById('getTopicsButton').addEventListener('click', function () {
+    chrome.runtime.sendMessage({ action: 'getTopics' }, _response => { });
+});
+
+document.getElementById('getTopicsErrorButton').addEventListener('click', function () {
+    chrome.runtime.sendMessage({ action: 'getTopicsError' }, _response => { });
+});
+
 function startCrawl(shouldCrawl) {
     const inclusionPattern = document.getElementById('inclusionPattern').value;
     const excludedLinks = document.getElementById('excludedLinks').value.split(',').map(link => link.trim());
