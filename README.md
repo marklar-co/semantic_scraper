@@ -1,36 +1,49 @@
-# NativeExt
+# Semantic Collector
 
-'NativeExt' is a placeholder name.
+Semantic Collector (`SemCollect`) is a tool to collect data from websites, for use cases like
+[Retrieval Augmented Generation](https://chamomile.ai/reliable-rag-with-data-preprocessing/).
 
-## Installation
+## Basic usage
 
-### Load the extension
+This hasn't been released on the web store yet, so for now this browser extension has to be loaded unpacked, in dev mode.
 
-Clone this repo, then:
+Clone this repo, then load unpacked, then:
 
 1) Go to `chrome://extensions`
 2) Enable `Developer mode`
 3) `Load unpacked`
-4) Open the service worker logs by clicking the Inspect view link
-5) Open the extension popup in the Chrome toolbar to simulate requests
+4) Open the service worker logs by clicking the Inspect view link (important to validate what's going on)
+5) Save some content. Download. Click clear when you're done to reset internal state.
 
-### Set up the native extension
+## Collect & Crawl
 
-1) Build the native extension binary using `cargo`, or [download the latest release](https://github.com/dxrcy/nativeext/releases/latest)
-2) Open `nativeext.json`
-3) Change the `"path"` value to the **absolute** path of the native extension binary
-4) Change the `"allowed-origins"` value to the extension ID\* (including trailing slash)
+Clear Data, click Collect & Crawl, then sit back and watch. When things stop, click Download to save results.
 
-\*Extension ID can be found on the `chrome://extensions` listing.
+**You must leave the popup in focus while crawl collection is happening.** You cannot use your browser while this operation
+is running.
 
-#### Windows
+The collector is hardcoded to avoid links that cross over to new hostnames, *however*, in the case of redirects
+we may end up on a new host. Therefore, it is *strongly recommended* to use the Link Inclusion Pattern regex,
+e.g. `https://chamomile\.ai/.*`.
 
-1) Open `regedit`
-2) Go to `Computer\HKEY_LOCAL_MACHINE\SOFTWARE\Google\Chrome\NativeMessagingHosts`
-3) Add key `ai.chamomile.nativeext` with default value of path to `nativeext.json`
+For extra protection, add specific URLs to exclude, e.g. those that are known to redirect.
 
-#### Linux
+## Limitations
 
-1) Go to `$XDG_CONFIG_HOME/google-chrome/NativeMessagingHosts` (replace `google-chrome` with `chromium` to use with Chromium)
-2) Copy or link the `nativeext.json` here, with the filename `ai.chamomile.nativeext.json`
+This codebase is very new and has some limitations. Some limitations will be easy to solve, and some will be harder.
 
+For limitations that require code changes, we're more than **happy to accept pull requests** for anything in
+the easy section. For things in the hard section please get in touch first by filing an issue, to discuss the
+approach.
+
+### Easy to solve
+
+* No crawl progress indicator (a practical approach would be to update links crawled/to crawl on the popup ui)
+* Can't save link inclusion/exclusion specifications to repeat the same jobs
+* Not tested at all on Edge (only tested on Chrome)
+* Very limited testing on complex sites
+* No metadata in the output file; we may, for instance, want to include collection date
+
+### Harder to solve
+
+* No scroll-to-complete-load functiionality
