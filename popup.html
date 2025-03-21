@@ -2,7 +2,7 @@
 <html>
 
 <head>
-    <title>NativeExt</title>
+    <title>SemCollect</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -18,13 +18,23 @@
 </head>
 
 <body>
-    <h1>NativeExt</h1>
+    <h1>Semantic Collector</h1>
     <hr>
-
-    <button id="pingButton">Send Ping</button>
-    <button id="getTopicsButton">Get Topics</button>
-    <button id="getTopicsErrorButton">Simulate Request Error</button>
-
+    <button id="collectButton">Collect Content</button>
+    <button id="clearButton">Clear Data</button>
+    <button id="downloadButton">Download Data</button>
+    <hr>
+    <label for="inclusionPattern">Link Inclusion Pattern (regex):</label>
+    <input type="text" id="inclusionPattern" placeholder="https://foo\.com/posts/[^/]+
+    ">
+    <br>
+    <label for="excludedLinks">Excluded Links (comma separated):</label>
+    <input type="text" id="excludedLinks" placeholder="https://foo.com/1, https://foo.com/2">
+    <br>
+    <label for="loadDelay">Minumum load delay (seconds):</label>
+    <input type="number" id="loadDelay" name="loadDelay" value="3" min="0"
+        title="Increasing delay may improve collection reliability on some pages">
+    <button id="crawlButton">Collect & Crawl</button>
     <script src="popup.js"></script>
 </body>
 
