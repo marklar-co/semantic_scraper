@@ -21,62 +21,10 @@ fn get_topics_many() {
 }
 
 #[test]
-fn get_config() {
-    // Start native extension
-    let binary = BinaryProgram::new();
-
-    /// Time between messages
-    const INTERVAL: Duration = Duration::from_millis(20);
-    /// Time to wait before collecting responses
-    const DELAY: Duration = Duration::from_secs(2);
-
-    // Run config server in the background
-    // Thread is terminated automatically after tests complete
-    let handle = thread::spawn(|| {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                run_config_server(INTERVAL).await;
-            });
-    });
-
-    // Wait for server to start, and a few updates
-    thread::sleep(DELAY);
-
-    // Config server thread should keep running for at least the rest of this function
-    if handle.is_finished() {
-        handle.join().expect("Config server thread panicked");
-        panic!("Config server exited early without a panic");
-    }
-
-    let responses = binary.receive();
-    assert!(responses.len() > 0, "No responses");
-
-    // Check responses are valid config updates
-    for response in responses {
-        let Response::UpdateConfig { key, value } = response else {
-            panic!("Unexpected response: {:?}", response);
-        };
-        assert!(
-            config::KEYS.contains(&key.as_str()),
-            "Unexpected config key: {:?}",
-            key,
-        );
-        assert!(
-            config::VALUES.contains(&value.as_str()),
-            "Unexpected config value: {:?}",
-            value,
-        );
-    }
-}
-
-#[test]
 #[timeout(2000)]
 fn invalid_topic() {
-    BinaryProgram::expect_response(
-        [
+    BinaryProgram::new()
+        .send([
             Request::GetTextTopics {
                 req_id: 7,
                 url: "".to_string(),
@@ -87,8 +35,8 @@ fn invalid_topic() {
                 url: "".to_string(),
                 text: "".to_string(),
             },
-        ],
-        [
+        ])
+        .expect_responses([
             Response::Error {
                 req_id: Some(7),
                 error: ErrorKind::ClientProcess,
@@ -97,14 +45,13 @@ fn invalid_topic() {
                 req_id: Some(8),
                 error: ErrorKind::ClientProcess,
             },
-        ],
-    );
+        ]);
 }
 
 #[timeout(8000)]
 fn ping() {
-    BinaryProgram::expect_response(
-        [
+    BinaryProgram::new()
+        .send([
             Request::Ping { req_id: 7 },
             Request::Ping { req_id: 14 },
             Request::Ping { req_id: 8 },
@@ -113,8 +60,8 @@ fn ping() {
             Request::Ping { req_id: 24 },
             Request::Ping { req_id: 18 },
             Request::Ping { req_id: 18 },
-        ],
-        [
+        ])
+        .expect_responses([
             Response::Pong { req_id: 7 },
             Response::Pong { req_id: 14 },
             Response::Pong { req_id: 8 },
@@ -123,14 +70,13 @@ fn ping() {
             Response::Pong { req_id: 24 },
             Response::Pong { req_id: 18 },
             Response::Pong { req_id: 18 },
-        ],
-    );
+        ]);
 }
 
 #[timeout(8000)]
 fn get_topics() {
-    BinaryProgram::expect_response(
-        [
+    BinaryProgram::new()
+        .send([
             Request::GetTextTopics {
                 req_id: 7,
                 url: "https://lorem.com/index.html".to_string(),
@@ -166,8 +112,7 @@ fn get_topics() {
                 url: "https://whitespace.com".to_string(),
                 text: "  \n \n ".to_string(),
             },
-        ],
-        [
+        ]).expect_responses([
             Response::ReturnTextTopics {
                 req_id: 7,
                 topics: vec![
@@ -218,6 +163,57 @@ fn get_topics() {
                     "FROM whitespace.com".to_string(),
                 ],
             },
-        ],
-    );
+        ]);
+}
+
+#[test]
+fn get_config() {
+    // Start native extension
+    let binary = BinaryProgram::new();
+
+    /// Time between messages
+    const INTERVAL: Duration = Duration::from_millis(20);
+    /// Time to wait before collecting responses
+    const DELAY: Duration = Duration::from_secs(2);
+
+    // Run config server in the background
+    // Thread is terminated automatically after tests complete
+    let handle = thread::spawn(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                run_config_server(INTERVAL).await;
+            });
+    });
+
+    // Wait for server to start, and a few updates
+    thread::sleep(DELAY);
+
+    // Config server thread should keep running for at least the rest of this function
+    if handle.is_finished() {
+        handle.join().expect("Config server thread panicked");
+        panic!("Config server exited early without a panic");
+    }
+
+    let responses = binary.receive();
+    assert!(responses.len() > 0, "No responses");
+
+    // Check responses are valid config updates
+    for response in responses {
+        let Response::UpdateConfig { key, value } = response else {
+            panic!("Unexpected response: {:?}", response);
+        };
+        assert!(
+            config::KEYS.contains(&key.as_str()),
+            "Unexpected config key: {:?}",
+            key,
+        );
+        assert!(
+            config::VALUES.contains(&value.as_str()),
+            "Unexpected config value: {:?}",
+            value,
+        );
+    }
 }
