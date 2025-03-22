@@ -37,14 +37,13 @@ impl BinaryProgram {
                 println!("responses: {:#?}", output_original);
                 panic!("response does not contain {:#?}", entry);
             };
-            // println!("response found: {:?}", entry);
             output.remove(index);
         }
 
-        // println!("left over responses: {:#?}", output);
+        println!("left over responses: {:#?}", output);
     }
 
-    fn send<A>(mut self, messages: A) -> Self
+    pub fn send<A>(mut self, messages: A) -> Self
     where
         A: IntoIterator<Item = Request> + Send + 'static,
     {
@@ -59,7 +58,7 @@ impl BinaryProgram {
         self
     }
 
-    fn receive(self) -> Vec<Response> {
+    pub fn receive(self) -> Vec<Response> {
         let mut bytes = self.receive_raw().into_iter().peekable();
         let mut responses = Vec::new();
         while bytes.peek().is_some() {

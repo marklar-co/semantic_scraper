@@ -1,9 +1,14 @@
 mod bin;
+mod config;
 mod utils;
 
-use self::bin::BinaryProgram;
-use nativeext::{ErrorKind, Request, Response};
+use std::{thread, time::Duration};
+
 use ntest::timeout;
+
+use self::bin::BinaryProgram;
+use self::config::run_config_server;
+use nativeext::{ErrorKind, Request, Response};
 
 #[test]
 fn ping_many() {
@@ -13,6 +18,51 @@ fn ping_many() {
 #[test]
 fn get_topics_many() {
     utils::parallelize(100, get_topics);
+}
+
+#[test]
+fn get_config() {
+    // Start native extension
+    let binary = BinaryProgram::new();
+
+    /// Time between messages
+    const INTERVAL: Duration = Duration::from_millis(20);
+    /// Time to wait before collecting responses
+    const DELAY: Duration = Duration::from_secs(2);
+
+    // Run config server in the background
+    // Thread is terminated automatically after tests complete
+    thread::spawn(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async { run_config_server(INTERVAL).await })
+            .expect("Failed to run test config server task");
+    });
+
+    // Wait for server to start, and a few updates
+    thread::sleep(DELAY);
+
+    let responses = binary.receive();
+    assert!(responses.len() > 0, "No responses");
+
+    // Check responses are valid config updates
+    for response in responses {
+        let Response::UpdateConfig { key, value } = response else {
+            panic!("Unexpected response: {:?}", response);
+        };
+        assert!(
+            config::KEYS.contains(&key.as_str()),
+            "Unexpected config key: {:?}",
+            key,
+        );
+        assert!(
+            config::VALUES.contains(&value.as_str()),
+            "Unexpected config value: {:?}",
+            value,
+        );
+    }
 }
 
 #[test]
