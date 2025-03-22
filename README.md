@@ -47,3 +47,13 @@ approach.
 ### Harder to solve
 
 * No scroll-to-complete-load functiionality
+
+## Testing
+
+Make sure [`cargo` is installed](https://rustup.rs).
+
+```sh
+cd native
+cargo test
+```
+
