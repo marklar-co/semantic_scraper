@@ -32,17 +32,24 @@ fn get_config() {
 
     // Run config server in the background
     // Thread is terminated automatically after tests complete
-    thread::spawn(|| {
+    let handle = thread::spawn(|| {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()
-            .block_on(async { run_config_server(INTERVAL).await })
-            .expect("Failed to run test config server task");
+            .block_on(async {
+                run_config_server(INTERVAL).await;
+            });
     });
 
     // Wait for server to start, and a few updates
     thread::sleep(DELAY);
+
+    // Config server thread should keep running for at least the rest of this function
+    if handle.is_finished() {
+        handle.join().expect("Config server thread panicked");
+        panic!("Config server exited early without a panic");
+    }
 
     let responses = binary.receive();
     assert!(responses.len() > 0, "No responses");
